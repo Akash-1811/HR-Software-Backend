@@ -36,9 +36,10 @@ FROM python:3.12-slim AS runtime
 
 WORKDIR /app
 
-# Runtime deps for MySQL and PostgreSQL clients (shared libs only)
+# Runtime deps for MySQL (mysqlclient → libmariadb) and PostgreSQL (shared libs only).
+# Debian trixie+ no longer ships the default-libmysqlclient metapackage name.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    default-libmysqlclient \
+    libmariadb3 \
     libpq5 \
     && rm -rf /var/lib/apt/lists/*
 
