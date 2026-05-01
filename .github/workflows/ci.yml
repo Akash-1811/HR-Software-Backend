@@ -98,6 +98,7 @@ jobs:
       - name: Tag and push to GHCR
         if: github.ref == 'refs/heads/main' && github.event_name == 'push'
         run: |
-          IMAGE=ghcr.io/${{ github.repository_owner }}/attenova
+          OWNER_LOWER=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+          IMAGE=ghcr.io/${OWNER_LOWER}/attenova
           docker tag attenova:${{ github.sha }} $IMAGE:latest
           docker push $IMAGE:latest
