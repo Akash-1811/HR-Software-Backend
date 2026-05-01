@@ -125,4 +125,3 @@ def send_book_demo_notification(
         html_body=html_body,
         logo_path=logo_path if has_logo else None,
     )
-

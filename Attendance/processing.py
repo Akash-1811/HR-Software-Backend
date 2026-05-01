@@ -91,18 +91,12 @@ class BiometricAttendanceProcessor:
 
                 first_in = min(p["log_date"] for p in in_punches)
                 last_out = max(p["log_date"] for p in out_punches)
-                working_hours = Decimal(
-                    str(round((last_out - first_in).total_seconds() / 3600, 2))
-                )
+                working_hours = Decimal(str(round((last_out - first_in).total_seconds() / 3600, 2)))
 
                 shift = self._resolve_shift(emp)
                 late_minutes = self._compute_late_minutes(first_in, shift)
                 early_out_minutes = self._compute_early_out_minutes(last_out, shift)
-                status = (
-                    AttendanceStatus.L
-                    if late_minutes > 0
-                    else AttendanceStatus.P
-                )
+                status = AttendanceStatus.L if late_minutes > 0 else AttendanceStatus.P
 
                 attendance, created = Attendance.objects.get_or_create(
                     employee=emp,
@@ -258,11 +252,18 @@ class BiometricAttendanceProcessor:
         attendance.early_out_minutes = early_out_minutes
         attendance.status = status
         attendance.source = AttendanceSource.BIOMETRIC
-        attendance.save(update_fields=[
-            "first_in", "last_out", "working_hours",
-            "late_minutes", "early_out_minutes",
-            "status", "source", "updated_at",
-        ])
+        attendance.save(
+            update_fields=[
+                "first_in",
+                "last_out",
+                "working_hours",
+                "late_minutes",
+                "early_out_minutes",
+                "status",
+                "source",
+                "updated_at",
+            ]
+        )
 
     def _sync_punches(self, attendance: Attendance, punches: list[dict]) -> int:
         """Replace punches for this attendance with the latest from raw. Returns count synced."""

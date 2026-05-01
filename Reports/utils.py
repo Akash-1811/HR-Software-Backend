@@ -27,18 +27,20 @@ def parse_date(value):
 
 def empty_attendance_response(start_date, end_date):
     """JsonResponse for attendance report when no data in scope."""
-    return JsonResponse({
-        "stats": {
-            "total_employees": 0,
-            "avg_attendance_pct": 0,
-            "late_today": 0,
-            "on_leave": 0,
-        },
-        "rows": [],
-        "total": 0,
-        "page": 1,
-        "page_size": 20,
-    })
+    return JsonResponse(
+        {
+            "stats": {
+                "total_employees": 0,
+                "avg_attendance_pct": 0,
+                "late_today": 0,
+                "on_leave": 0,
+            },
+            "rows": [],
+            "total": 0,
+            "page": 1,
+            "page_size": 20,
+        }
+    )
 
 
 def build_hierarchical_rows(
@@ -86,11 +88,7 @@ def build_hierarchical_rows(
         first_in = min(in_times).strftime("%H:%M:%S") if in_times else None
         last_out = max(out_times).strftime("%H:%M:%S") if out_times else None
 
-        ov = (
-            regularized_clocks.get((emp_code, att_date))
-            if regularized_clocks
-            else None
-        )
+        ov = regularized_clocks.get((emp_code, att_date)) if regularized_clocks else None
         if ov:
             if ov.get("first_in"):
                 first_in = ov["first_in"]
@@ -102,19 +100,21 @@ def build_hierarchical_rows(
         hours_worked = attendance_working_hours.get((emp_code, att_date))
         emp_id = emp.get("id")
         is_regularized = bool(regularized_clocks and (emp_code, att_date) in regularized_clocks)
-        rows.append({
-            "employee_code": emp["emp_code"],
-            "employee_name": emp["name"],
-            "employee_id": emp_id,
-            "date": att_date.strftime("%Y-%m-%d"),
-            "device_id": device_id,
-            "log_date": log_date_str,
-            "first_in": first_in,
-            "last_out": last_out,
-            "hours_worked": str(hours_worked) if hours_worked is not None else None,
-            "is_regularized": is_regularized,
-            "punches": punch_list,
-        })
+        rows.append(
+            {
+                "employee_code": emp["emp_code"],
+                "employee_name": emp["name"],
+                "employee_id": emp_id,
+                "date": att_date.strftime("%Y-%m-%d"),
+                "device_id": device_id,
+                "log_date": log_date_str,
+                "first_in": first_in,
+                "last_out": last_out,
+                "hours_worked": str(hours_worked) if hours_worked is not None else None,
+                "is_regularized": is_regularized,
+                "punches": punch_list,
+            }
+        )
     return rows
 
 
@@ -125,13 +125,9 @@ def fetch_working_hours_for_pairs(date_emp_pairs):
     q = Q()
     for emp_code, d in date_emp_pairs:
         q |= Q(employee__emp_code=emp_code, date=d)
-    atts = Attendance.objects.filter(q).values(
-        "employee__emp_code", "date", "working_hours"
-    )
+    atts = Attendance.objects.filter(q).values("employee__emp_code", "date", "working_hours")
     return {
-        (a["employee__emp_code"], a["date"]): float(a["working_hours"])
-        for a in atts
-        if a["working_hours"] is not None
+        (a["employee__emp_code"], a["date"]): float(a["working_hours"]) for a in atts if a["working_hours"] is not None
     }
 
 
@@ -340,16 +336,18 @@ def compute_attendance_report_stats(employees_qs, start_date, end_date):
             "on_leave": 0,
         }
     emp_ids = list(employees_qs.values_list("id", flat=True))
-    present_in_range = Attendance.objects.filter(
-        employee_id__in=emp_ids,
-        date__gte=start_date,
-        date__lte=end_date,
-        status__in=[AttendanceStatus.P, AttendanceStatus.L],
-    ).values("employee_id").distinct().count()
-    avg_pct = (
-        round(100 * present_in_range / total_employees, 1)
-        if total_employees else 0
+    present_in_range = (
+        Attendance.objects.filter(
+            employee_id__in=emp_ids,
+            date__gte=start_date,
+            date__lte=end_date,
+            status__in=[AttendanceStatus.P, AttendanceStatus.L],
+        )
+        .values("employee_id")
+        .distinct()
+        .count()
     )
+    avg_pct = round(100 * present_in_range / total_employees, 1) if total_employees else 0
     today = timezone.now().date()
     late_today = Attendance.objects.filter(
         employee_id__in=emp_ids,
@@ -532,12 +530,8 @@ def resolve_office_for_email_context(user, office_id_from_request: int | None):
     office = None
 
     if office_id_from_request is not None:
-        office = Office.objects.filter(
-            pk=office_id_from_request, is_active=True
-        ).first()
-        if not office or (
-            user.organization_id and office.organization_id != user.organization_id
-        ):
+        office = Office.objects.filter(pk=office_id_from_request, is_active=True).first()
+        if not office or (user.organization_id and office.organization_id != user.organization_id):
             raise ValueError("Office not found or not in your organization")
     elif getattr(user, "office_id", None):
         office = Office.objects.filter(pk=user.office_id, is_active=True).first()
@@ -563,10 +557,7 @@ def resolve_office_for_email_context(user, office_id_from_request: int | None):
 
 def matrix_attachment_and_workflow_labels(office, user) -> tuple[str, str]:
     """Attachment/subject label and CSV workflow line text."""
-    same_org = (
-        user.organization_id
-        and office.organization_id == user.organization_id
-    )
+    same_org = user.organization_id and office.organization_id == user.organization_id
     if same_org and office.organization_id and office.organization:
         attachment = office.organization.name
     else:

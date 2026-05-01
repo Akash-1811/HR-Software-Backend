@@ -59,7 +59,5 @@ class Command(BaseCommand):
         try:
             return datetime.strptime(value, "%Y-%m-%d").date()
         except ValueError:
-            self.stderr.write(
-                self.style.ERROR(f"Invalid date format: {value}. Use YYYY-MM-DD.")
-            )
+            self.stderr.write(self.style.ERROR(f"Invalid date format: {value}. Use YYYY-MM-DD."))
             return None

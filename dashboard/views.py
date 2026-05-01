@@ -59,9 +59,7 @@ def build_dashboard_home_payload(*, query_get: QueryDict, user: Any, today) -> D
     pending_rq = _get_regularization_queryset(user)
     pending_regularizations = pending_rq.filter(status=RegularizationStatus.PENDING).count()
 
-    trend_dates_payload, trend_rates = utils.build_daily_trend_rates(
-        emp_ids_sorted, attendance_map, dates_ordered
-    )
+    trend_dates_payload, trend_rates = utils.build_daily_trend_rates(emp_ids_sorted, attendance_map, dates_ordered)
     recent = utils.recent_check_events_for_roster(emp_ids_sorted, dash_req.punch_preview_limit)
     cmp_prior = utils.prior_day_rate_comparison(emp_ids_sorted, dash_req.as_of, attendance_map)
 
@@ -69,17 +67,9 @@ def build_dashboard_home_payload(*, query_get: QueryDict, user: Any, today) -> D
     shift_ids_nonnull = {r["shift_id"] for r in roster_values if r["shift_id"]}
     dept_ids_nonnull = {r["department_id"] for r in roster_values if r["department_id"]}
 
-    office_labels = {
-        o["id"]: o["name"] for o in Office.objects.filter(pk__in=office_ids).values("id", "name")
-    }
-    shift_labels = {
-        s["id"]: s["name"]
-        for s in Shift.objects.filter(pk__in=shift_ids_nonnull).values("id", "name")
-    }
-    dept_labels = {
-        x["id"]: x["name"]
-        for x in Department.objects.filter(pk__in=dept_ids_nonnull).values("id", "name")
-    }
+    office_labels = {o["id"]: o["name"] for o in Office.objects.filter(pk__in=office_ids).values("id", "name")}
+    shift_labels = {s["id"]: s["name"] for s in Shift.objects.filter(pk__in=shift_ids_nonnull).values("id", "name")}
+    dept_labels = {x["id"]: x["name"] for x in Department.objects.filter(pk__in=dept_ids_nonnull).values("id", "name")}
 
     office_groups = utils.group_roster_by_axis(roster_values, utils.BreakdownAxis.OFFICE_ID)
     shift_groups = utils.group_roster_by_axis(roster_values, utils.BreakdownAxis.SHIFT_ID)
@@ -152,9 +142,7 @@ def build_attention_report_payload(*, query_get: QueryDict, user: Any, today) ->
     )
     search = (query_get.get("search") or "").strip()
     if search:
-        employees_qs = employees_qs.filter(
-            Q(name__icontains=search) | Q(emp_code__icontains=search)
-        )
+        employees_qs = employees_qs.filter(Q(name__icontains=search) | Q(emp_code__icontains=search))
 
     roster_values = list(
         employees_qs.values(
@@ -193,10 +181,7 @@ def build_attention_report_payload(*, query_get: QueryDict, user: Any, today) ->
     }
 
     office_ids = {r["office_id"] for r in roster_values if r.get("office_id")}
-    office_labels = {
-        o["id"]: o["name"]
-        for o in Office.objects.filter(pk__in=office_ids).values("id", "name")
-    }
+    office_labels = {o["id"]: o["name"] for o in Office.objects.filter(pk__in=office_ids).values("id", "name")}
 
     rows_all = utils.build_attention_issue_rows(
         roster_values,

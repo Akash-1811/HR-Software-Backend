@@ -45,9 +45,7 @@ def validate_matrix_date_range(start_date: date, end_date: date) -> None:
         raise ValueError("start_date must be <= end_date")
     span = (end_date - start_date).days + 1
     if span > MAX_MATRIX_DATE_RANGE_DAYS:
-        raise ValueError(
-            f"Date range must be at most {MAX_MATRIX_DATE_RANGE_DAYS} days (requested {span})"
-        )
+        raise ValueError(f"Date range must be at most {MAX_MATRIX_DATE_RANGE_DAYS} days (requested {span})")
 
 
 def build_matrix_csv_bundle_for_user(
@@ -93,31 +91,22 @@ def build_matrix_csv_bundle_for_user(
     query = (search or "").strip()
     if query:
         emp_codes = set(
-            employee_qs.filter(
-                Q(name__icontains=query) | Q(emp_code__icontains=query)
-            ).values_list("emp_code", flat=True)
+            employee_qs.filter(Q(name__icontains=query) | Q(emp_code__icontains=query)).values_list(
+                "emp_code", flat=True
+            )
         )
         if not emp_codes:
             raise ValueError("No employees match the search filter")
 
     employee_by_code = {
-        row["emp_code"]: row
-        for row in employee_qs.filter(emp_code__in=emp_codes).values(
-            "id", "emp_code", "name"
-        )
+        row["emp_code"]: row for row in employee_qs.filter(emp_code__in=emp_codes).values("id", "emp_code", "name")
     }
 
     office = resolve_office_for_email_context(user, office_id)
-    attachment_label, workflow_title = matrix_attachment_and_workflow_labels(
-        office, user
-    )
+    attachment_label, workflow_title = matrix_attachment_and_workflow_labels(office, user)
 
-    punches_by_day = load_biometric_punches_grouped_by_employee_and_date(
-        emp_codes, start_date, end_date
-    )
-    attendance_index = load_attendance_index_by_employee_and_date(
-        employee_by_code, start_date, end_date
-    )
+    punches_by_day = load_biometric_punches_grouped_by_employee_and_date(emp_codes, start_date, end_date)
+    attendance_index = load_attendance_index_by_employee_and_date(employee_by_code, start_date, end_date)
 
     builder = VendorMatrixCsvBuilder(
         calendar_days=inclusive_calendar_days(start_date, end_date),
@@ -130,9 +119,7 @@ def build_matrix_csv_bundle_for_user(
 
     csv_bytes = encode_rows_as_utf8_sig_csv(matrix_rows)
     safe_label = attachment_label.replace(" ", "_")
-    filename = (
-        f"Daily_Attendance_{safe_label}_{start_date.isoformat()}_to_{end_date.isoformat()}.csv"
-    )
+    filename = f"Daily_Attendance_{safe_label}_{start_date.isoformat()}_to_{end_date.isoformat()}.csv"
     return csv_bytes, filename, office, attachment_label
 
 
@@ -214,9 +201,7 @@ class VendorMatrixCsvBuilder:
                 if slot < len(pairs):
                     t_in, t_out = pairs[slot]
                     in_row.append(self._fmt.clock_hh_mm(t_in) if t_in else "")
-                    out_row.append(
-                        self._fmt.clock_hh_mm(t_out) if t_out else "M"
-                    )
+                    out_row.append(self._fmt.clock_hh_mm(t_out) if t_out else "M")
                 else:
                     in_row.append("")
                     out_row.append("")
@@ -242,10 +227,7 @@ class VendorMatrixCsvBuilder:
         return "A"
 
     def _punch_type_row(self, emp_code: str) -> list[Any]:
-        cells = [
-            self._status_code_for_day(emp_code, d, self._punches, self._attendance)
-            for d in self._days
-        ]
+        cells = [self._status_code_for_day(emp_code, d, self._punches, self._attendance) for d in self._days]
         presentish_days = sum(1 for c in cells if c in MATRIX_PRESENTISH_STATUSES)
         total = str(presentish_days) if presentish_days else "0"
         return ["3PunchType", total, *cells]

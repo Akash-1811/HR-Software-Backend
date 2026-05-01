@@ -398,7 +398,9 @@ class EmployeeView(View):
             update_fields.add("shift")
         if "office_id" in body:
             office_id_new = safe_int(body.get("office_id"))
-            office = Office.objects.filter(pk=office_id_new).prefetch_related("managers").first() if office_id_new else None
+            office = (
+                Office.objects.filter(pk=office_id_new).prefetch_related("managers").first() if office_id_new else None
+            )
             if not office_belongs_to_organization(office, emp.organization_id):
                 return JsonResponse({"error": "Office not found or must belong to same organization"}, status=400)
             if not user_can_access_office(user, office):

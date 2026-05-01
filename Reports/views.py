@@ -69,17 +69,13 @@ class AttendanceReport(View):
             request.user,
             request.GET,
         )
-        emp_codes = set(
-            employees_qs.values_list("emp_code", flat=True).distinct()
-        )
+        emp_codes = set(employees_qs.values_list("emp_code", flat=True).distinct())
         if not emp_codes:
             return empty_attendance_response(start_date, end_date)
 
         search = (request.GET.get("search") or "").strip()
         if search:
-            search_qs = employees_qs.filter(
-                Q(name__icontains=search) | Q(emp_code__icontains=search)
-            )
+            search_qs = employees_qs.filter(Q(name__icontains=search) | Q(emp_code__icontains=search))
             emp_codes = set(search_qs.values_list("emp_code", flat=True))
             if not emp_codes:
                 return empty_attendance_response(start_date, end_date)
@@ -92,10 +88,7 @@ class AttendanceReport(View):
         sort_desc = sort != "date_asc"
 
         emp_map = {
-            e["emp_code"]: e
-            for e in employees_qs.filter(emp_code__in=emp_codes).values(
-                "id", "emp_code", "name"
-            )
+            e["emp_code"]: e for e in employees_qs.filter(emp_code__in=emp_codes).values("id", "emp_code", "name")
         }
 
         qs = DummyEsslBiometricAttendanceData.objects.filter(
@@ -107,11 +100,7 @@ class AttendanceReport(View):
         if direction_filter:
             qs = qs.filter(Direction__iexact=direction_filter)
 
-        raw = list(
-            qs.order_by("-LogDate", "UserId").values(
-                "UserId", "DeviceId", "LogDate", "Direction"
-            )
-        )
+        raw = list(qs.order_by("-LogDate", "UserId").values("UserId", "DeviceId", "LogDate", "Direction"))
 
         # Group by (emp_code, date) - single pass
         groups = defaultdict(list)
@@ -147,13 +136,15 @@ class AttendanceReport(View):
 
         stats = compute_attendance_report_stats(employees_qs, start_date, end_date)
 
-        return JsonResponse({
-            "stats": stats,
-            "rows": rows,
-            "total": total,
-            "page": page,
-            "page_size": page_size,
-        })
+        return JsonResponse(
+            {
+                "stats": stats,
+                "rows": rows,
+                "total": total,
+                "page": page,
+                "page_size": page_size,
+            }
+        )
 
 
 @method_decorator(require_auth, name="dispatch")
@@ -191,18 +182,20 @@ class RegularizationReport(View):
         )
         emp_ids = list(employees_qs.values_list("id", flat=True))
         if not emp_ids:
-            return JsonResponse({
-                "summary": {
+            return JsonResponse(
+                {
+                    "summary": {
+                        "total": 0,
+                        "pending": 0,
+                        "approved": 0,
+                        "rejected": 0,
+                    },
+                    "rows": [],
                     "total": 0,
-                    "pending": 0,
-                    "approved": 0,
-                    "rejected": 0,
-                },
-                "rows": [],
-                "total": 0,
-                "page": 1,
-                "page_size": 20,
-            })
+                    "page": 1,
+                    "page_size": 20,
+                }
+            )
 
         qs = regularizations_visible_to_user(request.user).filter(
             employee_id__in=emp_ids,
@@ -235,18 +228,20 @@ class RegularizationReport(View):
         total = summary_row["total"]
         regs = list(qs[start_offset : start_offset + page_size])
 
-        return JsonResponse({
-            "summary": {
+        return JsonResponse(
+            {
+                "summary": {
+                    "total": total,
+                    "pending": summary_row["pending"],
+                    "approved": summary_row["approved"],
+                    "rejected": summary_row["rejected"],
+                },
+                "rows": [regularization_payload(r) for r in regs],
                 "total": total,
-                "pending": summary_row["pending"],
-                "approved": summary_row["approved"],
-                "rejected": summary_row["rejected"],
-            },
-            "rows": [regularization_payload(r) for r in regs],
-            "total": total,
-            "page": page,
-            "page_size": page_size,
-        })
+                "page": page,
+                "page_size": page_size,
+            }
+        )
 
 
 @method_decorator([csrf_exempt, require_auth], name="dispatch")
@@ -322,8 +317,10 @@ class SendAttendanceEmailReport(View):
         except ValueError as e:
             return JsonResponse({"error": str(e)}, status=400)
 
-        return JsonResponse({
-            "success": True,
-            "message": result["message"],
-            "sent": result["sent"],
-        })
+        return JsonResponse(
+            {
+                "success": True,
+                "message": result["message"],
+                "sent": result["sent"],
+            }
+        )

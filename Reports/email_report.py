@@ -117,10 +117,7 @@ def send_report_email(
         excel_bytes, filename = matrix_attachment
     else:
         excel_bytes = build_excel_bytes(rows, office_name, report_date_str)
-        filename = (
-            f"Daily_Attendance_{office_name.replace(' ', '_')}_"
-            f"{report_date.strftime('%Y-%m-%d')}.xlsx"
-        )
+        filename = f"Daily_Attendance_{office_name.replace(' ', '_')}_{report_date.strftime('%Y-%m-%d')}.xlsx"
 
     if matrix_attachment:
         subject = f"[Attenova] Attendance Matrix — {office_name} ({report_date_str})"
@@ -287,11 +284,7 @@ def run_send_manual_ui_report(
         search=search or "",
     )
     period = _format_report_period(start_date, end_date)
-    to_emails = list(
-        dict.fromkeys(
-            [e for e in [user.email, "akashyadav181198@gmail.com"] if e]
-        )
-    )
+    to_emails = list(dict.fromkeys([e for e in [user.email, "akashyadav181198@gmail.com"] if e]))
     send_report_email(
         [],
         office,
