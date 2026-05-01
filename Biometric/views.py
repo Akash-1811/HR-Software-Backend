@@ -1,4 +1,3 @@
-import json
 import pymysql
 
 from django.conf import settings
@@ -8,7 +7,8 @@ from django.utils.decorators import method_decorator
 from django.views import View
 from django.views.decorators.csrf import csrf_exempt
 
-from Organization.views import _user_can_access_office
+from Attenova.api_utils import parse_json_request
+from Organization.access import user_can_access_office
 from Users.auth_utils import require_auth
 
 from Biometric.models import BiometricDevice
@@ -18,6 +18,9 @@ from Biometric.utils import (
     get_devices_queryset,
     get_essl_conn_params,
 )
+
+_ALLOWED_DEVICE_TYPE = {x[0] for x in BiometricDevice.DeviceType.choices}
+_ALLOWED_DEVICE_DIRECTION = {x[0] for x in BiometricDevice.DeviceDirection.choices}
 
 
 @method_decorator(csrf_exempt, name="dispatch")
@@ -67,21 +70,35 @@ class BiometricDeviceView(View):
         device = BiometricDevice.objects.filter(pk=pk).select_related("office").first()
         if not device:
             return JsonResponse({"error": "Not found"}, status=404)
-        if not _user_can_access_office(request.user, device.office):
+        if not user_can_access_office(request.user, device.office):
             return JsonResponse({"error": "Not found"}, status=404)
         return JsonResponse(device_payload(device), status=200)
 
     def _create(self, request):
         user = request.user
-        try:
-            body = json.loads(request.body) if request.body else {}
-        except json.JSONDecodeError:
-            return JsonResponse({"error": "Invalid JSON"}, status=400)
+        body, err = parse_json_request(request)
+        if err:
+            return err
 
         office_id = body.get("office_id")
         device_id = (body.get("device_id") or "").strip()
         name = (body.get("name") or "").strip()
         is_active = bool(body.get("is_active", True))
+        serial_number = (body.get("serial_number") or "").strip()[:128]
+        ip_address = (body.get("ip_address") or "").strip()[:45]
+        device_location = (body.get("device_location") or "").strip()[:255]
+        device_type = (body.get("device_type") or "").strip().lower()
+        if device_type and device_type not in _ALLOWED_DEVICE_TYPE:
+            return JsonResponse(
+                {"error": "device_type must be one of: face, finger, both, rfid"},
+                status=400,
+            )
+        device_direction = (body.get("device_direction") or "").strip().lower()
+        if device_direction and device_direction not in _ALLOWED_DEVICE_DIRECTION:
+            return JsonResponse(
+                {"error": "device_direction must be one of: in, out, alternate_in_out"},
+                status=400,
+            )
 
         if not office_id:
             return JsonResponse({"error": "office_id is required"}, status=400)
@@ -98,7 +115,7 @@ class BiometricDeviceView(View):
         office = Office.objects.filter(pk=office_id).prefetch_related("managers").first()
         if not office:
             return JsonResponse({"error": "Office not found"}, status=404)
-        if not _user_can_access_office(user, office):
+        if not user_can_access_office(user, office):
             return JsonResponse({"error": "Not authorized for this office"}, status=403)
 
         if BiometricDevice.objects.filter(office_id=office_id, device_id=device_id).exists():
@@ -112,6 +129,11 @@ class BiometricDeviceView(View):
                 office_id=office_id,
                 device_id=device_id,
                 name=name,
+                serial_number=serial_number,
+                ip_address=ip_address,
+                device_location=device_location,
+                device_type=device_type,
+                device_direction=device_direction,
                 is_active=is_active,
             )
         except ValidationError as e:
@@ -124,13 +146,12 @@ class BiometricDeviceView(View):
         device = BiometricDevice.objects.filter(pk=pk).select_related("office").first()
         if not device:
             return JsonResponse({"error": "Not found"}, status=404)
-        if not _user_can_access_office(user, device.office):
+        if not user_can_access_office(user, device.office):
             return JsonResponse({"error": "Not found"}, status=404)
 
-        try:
-            body = json.loads(request.body) if request.body else {}
-        except json.JSONDecodeError:
-            return JsonResponse({"error": "Invalid JSON"}, status=400)
+        body, err = parse_json_request(request)
+        if err:
+            return err
 
         if "name" in body:
             device.name = (body.get("name") or "").strip()
@@ -150,6 +171,28 @@ class BiometricDeviceView(View):
                     status=409,
                 )
             device.device_id = new_device_id
+        if "serial_number" in body:
+            device.serial_number = (body.get("serial_number") or "").strip()[:128]
+        if "ip_address" in body:
+            device.ip_address = (body.get("ip_address") or "").strip()[:45]
+        if "device_location" in body:
+            device.device_location = (body.get("device_location") or "").strip()[:255]
+        if "device_type" in body:
+            device_type = (body.get("device_type") or "").strip().lower()
+            if device_type and device_type not in _ALLOWED_DEVICE_TYPE:
+                return JsonResponse(
+                    {"error": "device_type must be one of: face, finger, both, rfid"},
+                    status=400,
+                )
+            device.device_type = device_type
+        if "device_direction" in body:
+            device_direction = (body.get("device_direction") or "").strip().lower()
+            if device_direction and device_direction not in _ALLOWED_DEVICE_DIRECTION:
+                return JsonResponse(
+                    {"error": "device_direction must be one of: in, out, alternate_in_out"},
+                    status=400,
+                )
+            device.device_direction = device_direction
 
         try:
             device.full_clean()
@@ -163,7 +206,7 @@ class BiometricDeviceView(View):
         device = BiometricDevice.objects.filter(pk=pk).select_related("office").first()
         if not device:
             return JsonResponse({"error": "Not found"}, status=404)
-        if not _user_can_access_office(request.user, device.office):
+        if not user_can_access_office(request.user, device.office):
             return JsonResponse({"error": "Not found"}, status=404)
         device.delete()
         return JsonResponse({"message": "Deleted"}, status=200)

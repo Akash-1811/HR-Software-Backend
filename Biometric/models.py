@@ -62,6 +62,17 @@ class BiometricDevice(models.Model):
     ESSL device logs (e.g. 119, 103). Used in the frontend to map devices to offices.
     """
 
+    class DeviceType(models.TextChoices):
+        FACE = "face", "Face"
+        FINGER = "finger", "Finger"
+        BOTH = "both", "Both"
+        RFID = "rfid", "RFID"
+
+    class DeviceDirection(models.TextChoices):
+        IN = "in", "In"
+        OUT = "out", "Out"
+        ALTERNATE = "alternate_in_out", "Alternate In/Out"
+
     office = models.ForeignKey(
         "Organization.Office",
         on_delete=models.CASCADE,
@@ -69,6 +80,23 @@ class BiometricDevice(models.Model):
     )
     device_id = models.CharField(max_length=128, db_index=True)
     name = models.CharField(max_length=255, blank=True)
+    serial_number = models.CharField(max_length=128, blank=True)
+    ip_address = models.CharField(
+        max_length=45,
+        blank=True,
+        help_text="IPv4, IPv6, or hostname",
+    )
+    device_location = models.CharField(max_length=255, blank=True)
+    device_direction = models.CharField(
+        max_length=32,
+        blank=True,
+        choices=DeviceDirection.choices,
+    )
+    device_type = models.CharField(
+        max_length=16,
+        blank=True,
+        choices=DeviceType.choices,
+    )
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

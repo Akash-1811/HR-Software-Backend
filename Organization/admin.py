@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from Organization.models import Organization, Office
+from Organization.models import Organization, Office, Department
 
 
 class OrganizationAdmin(admin.ModelAdmin):
@@ -35,3 +35,11 @@ class OfficeAdmin(admin.ModelAdmin):
 
 
 admin.site.register(Office, OfficeAdmin)
+
+
+@admin.register(Department)
+class DepartmentAdmin(admin.ModelAdmin):
+    list_display = ("name", "office", "is_active", "created_at")
+    list_filter = ("is_active", "office__organization")
+    search_fields = ("name", "office__name")
+    ordering = ("office", "name")

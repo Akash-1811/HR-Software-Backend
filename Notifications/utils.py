@@ -8,6 +8,13 @@ from django.contrib.contenttypes.models import ContentType
 from Notifications.models import Notification
 
 
+def _generic_fk_for_object(related_object):
+    """Resolve ContentType + pk for a related model instance."""
+    if related_object is None:
+        return None, None
+    return ContentType.objects.get_for_model(related_object), related_object.pk
+
+
 def create_notification(
     recipient,
     notification_type: str,
@@ -20,11 +27,7 @@ def create_notification(
     Create a single notification, optionally linked to any model instance.
     created_by: User who triggered the notification; None for system-generated.
     """
-    content_type = None
-    object_id = None
-    if related_object is not None:
-        content_type = ContentType.objects.get_for_model(related_object)
-        object_id = related_object.pk
+    content_type, object_id = _generic_fk_for_object(related_object)
 
     return Notification.objects.create(
         recipient=recipient,
@@ -49,11 +52,7 @@ def create_bulk_notifications(
     Create the same notification for every user in *recipients*.
     created_by: User who triggered the notification; None for system-generated.
     """
-    content_type = None
-    object_id = None
-    if related_object is not None:
-        content_type = ContentType.objects.get_for_model(related_object)
-        object_id = related_object.pk
+    content_type, object_id = _generic_fk_for_object(related_object)
 
     notifications = [
         Notification(

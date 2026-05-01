@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>New demo request</title>
+</head>
+<body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; background-color: #f4f4f5; line-height: 1.55;">
+  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background-color: #f4f4f5;">
+    <tr>
+      <td align="center" style="padding: 36px 16px;">
+        <table role="presentation" width="600" cellspacing="0" cellpadding="0" style="max-width: 600px; width: 100%; background-color: #ffffff; border-radius: 10px; overflow: hidden; box-shadow: 0 4px 24px rgba(15, 23, 42, 0.08);">
+
+          <!-- Header -->
+          <tr>
+            <td style="background: linear-gradient(135deg, #1e0538 0%, #2e1068 55%, #3b0764 100%); padding: 26px 32px;">
+              <table role="presentation" width="100%" cellspacing="0" cellpadding="0">
+                <tr>
+                  <td valign="middle" style="text-align: left;">
+                    {% if has_logo %}
+                    <img src="cid:attenova_logo" alt="" width="36" height="36" style="display: inline-block; height: 36px; width: auto; vertical-align: middle; margin-right: 12px; border-radius: 8px;" />
+                    {% endif %}
+                    <span style="color: #fafafa; font-size: 21px; font-weight: 700; letter-spacing: -0.4px; vertical-align: middle;">Attenova</span>
+                  </td>
+                  <td valign="middle" align="right" style="text-align: right;">
+                    <span style="display: inline-block; font-size: 11px; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase; color: rgba(250, 250, 250, 0.82); padding: 6px 10px; border-radius: 9999px; background: rgba(255,255,255,0.12); border: 1px solid rgba(255,255,255,0.18);">Book a demo</span>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <!-- Intro -->
+          <tr>
+            <td style="padding: 34px 32px 28px;">
+              <h1 style="margin: 0 0 8px; font-size: 23px; font-weight: 700; color: #18181b; line-height: 1.35;">
+                New demo request
+              </h1>
+              <p style="margin: 0 0 22px; font-size: 15px; color: #71717a;">
+                Someone submitted the form on your marketing site. Reply with one click using the&nbsp;buttons in your inbox, or use the&nbsp;contact details below.
+              </p>
+
+              <!-- Details card -->
+              <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border: 1px solid #e4e4e7; border-radius: 10px; overflow: hidden;">
+                <tr>
+                  <td colspan="2" style="padding: 12px 16px; background-color: #fafafa; border-bottom: 1px solid #e4e4e7; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: #52525b;">Contact details</td>
+                </tr>
+                <tr>
+                  <td style="padding: 12px 16px; width: 132px; font-size: 13px; font-weight: 600; color: #52525b; border-bottom: 1px solid #f4f4f5;">Name</td>
+                  <td style="padding: 12px 16px; font-size: 14px; color: #18181b; border-bottom: 1px solid #f4f4f5;">{{ name }}</td>
+                </tr>
+                <tr>
+                  <td style="padding: 12px 16px; font-size: 13px; font-weight: 600; color: #52525b; border-bottom: 1px solid #f4f4f5;">Company email</td>
+                  <td style="padding: 12px 16px; font-size: 14px; color: #18181b; border-bottom: 1px solid #f4f4f5;"><a href="mailto:{{ company_email }}" style="color: #6d28d9; font-weight: 600; text-decoration: none;">{{ company_email }}</a></td>
+                </tr>
+                <tr>
+                  <td style="padding: 12px 16px; font-size: 13px; font-weight: 600; color: #52525b; border-bottom: 1px solid #f4f4f5;">Company name</td>
+                  <td style="padding: 12px 16px; font-size: 14px; color: #18181b; border-bottom: 1px solid #f4f4f5;">{{ company_name }}</td>
+                </tr>
+                <tr>
+                  <td style="padding: 12px 16px; font-size: 13px; font-weight: 600; color: #52525b; {% if message %}border-bottom: 1px solid #f4f4f5;{% endif %}">Phone</td>
+                  <td style="padding: 12px 16px; font-size: 14px; color: #18181b; font-variant-numeric: tabular-nums; {% if message %}border-bottom: 1px solid #f4f4f5;{% endif %}">{{ contact_number }}</td>
+                </tr>
+                {% if message %}
+                <tr>
+                  <td valign="top" style="padding: 12px 16px; font-size: 13px; font-weight: 600; color: #52525b;">Message</td>
+                  <td style="padding: 12px 16px; font-size: 14px; color: #3f3f46; white-space: pre-wrap;">{{ message }}</td>
+                </tr>
+                {% endif %}
+              </table>
+
+              <p style="margin: 22px 0 0; font-size: 13px; color: #a1a1aa;">
+                <strong style="color: #52525b;">Received:</strong> {{ submitted_at_display }}
+              </p>
+            </td>
+          </tr>
+
+          <!-- Accent strip -->
+          <tr>
+            <td style="height: 4px; background: linear-gradient(90deg, #7c3aed 0%, #a855f7 45%, #c084fc 100%); font-size: 0; line-height: 0;">&nbsp;</td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td style="padding: 26px 32px 30px; background-color: #fafafa; border-top: 1px solid #e4e4e7;">
+              <p style="margin: 0 0 10px; font-size: 13px; color: #71717a; text-align: center; line-height: 1.5;">
+                <strong style="color: #3f3f46;">Attenova</strong> · HR &amp; attendance management
+              </p>
+              <p style="margin: 0 0 8px; font-size: 12px; color: #a1a1aa; text-align: center;">
+                Powered by <strong style="color: #71717a;">Aaryan Infotech</strong>
+              </p>
+              <p style="margin: 0; font-size: 11px; color: #a1a1aa; text-align: center;">
+                &copy; {{ year }} Attenova · This notification was triggered by an inbound demo form submission.
+              </p>
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>

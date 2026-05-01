@@ -1,4 +1,3 @@
-import json
 from datetime import datetime
 
 from django.http import JsonResponse
@@ -11,7 +10,7 @@ from django.views.decorators.http import require_http_methods
 from Users.auth_utils import require_auth
 from Users.models import UserRole
 from Employee.models import Employee
-from Employee.utils import is_superadmin
+from Attenova.api_utils import pagination_params, parse_json_request, parse_iso_date
 from Attendance.models import (
     Attendance,
     AttendanceRegularization,
@@ -25,6 +24,7 @@ from Attendance.utils import (
     get_approvers_for_employee,
     is_auto_approved,
     regularization_payload,
+    regularizations_visible_to_user,
 )
 from Notifications.models import NotificationType
 from Notifications.utils import create_bulk_notifications, create_notification
@@ -47,26 +47,7 @@ def _parse_datetime(value):
 
 
 def _get_regularization_queryset(user):
-    """Regularizations visible to *user*. Org Admin: all in org. Office Admin/Supervisor: only their office if user.office_id. Manager: only their offices."""
-    qs = AttendanceRegularization.objects.select_related(
-        "employee",
-        "employee__office",
-        "attendance",
-        "requested_by",
-        "reviewed_by",
-    )
-    if is_superadmin(user):
-        return qs
-    if user.role == UserRole.ORG_ADMIN and user.organization_id:
-        return qs.filter(employee__organization_id=user.organization_id)
-    if user.role in (UserRole.OFFICE_ADMIN, UserRole.SUPERVISOR) and user.organization_id:
-        qs = qs.filter(employee__organization_id=user.organization_id)
-        if getattr(user, "office_id", None):
-            qs = qs.filter(employee__office_id=user.office_id)
-        return qs
-    if user.role == UserRole.OFFICE_MANAGER:
-        return qs.filter(employee__office__managers=user)
-    return qs.none()
+    return regularizations_visible_to_user(user)
 
 
 # ── Views ───────────────────────────────────────────────────────────
@@ -76,15 +57,15 @@ def _get_regularization_queryset(user):
 class RegularizationView(View):
     """
     POST /api/attendance/regularizations/      — create
-    GET  /api/attendance/regularizations/       — list
+    GET  /api/attendance/regularizations/       — list (filters: employee_id, date=YYYY-MM-DD, status,
+                                                     date_from/date_to, office_id for Org Admin)
     GET  /api/attendance/regularizations/<pk>/  — detail
     """
 
     def post(self, request):
-        try:
-            body = json.loads(request.body)
-        except (json.JSONDecodeError, ValueError):
-            return JsonResponse({"error": "Invalid JSON body"}, status=400)
+        body, err = parse_json_request(request)
+        if err:
+            return err
 
         employee_id = body.get("employee_id")
         date_str = body.get("date")
@@ -111,9 +92,8 @@ class RegularizationView(View):
         if not can_regularize_employee(request.user, employee):
             return JsonResponse({"error": "Not authorized for this employee"}, status=403)
 
-        try:
-            att_date = datetime.strptime(date_str[:10], "%Y-%m-%d").date()
-        except (ValueError, TypeError):
+        att_date = parse_iso_date(date_str)
+        if att_date is None:
             return JsonResponse({"error": "Invalid date format (expected YYYY-MM-DD)"}, status=400)
 
         try:
@@ -144,6 +124,9 @@ class RegularizationView(View):
             attendance=attendance,
             employee=employee,
             date=att_date,
+            previous_first_in=attendance.first_in,
+            previous_last_out=attendance.last_out,
+            previous_status=attendance.status,
             new_status=new_status,
             new_first_in=new_first_in,
             new_last_out=new_last_out,
@@ -211,9 +194,13 @@ class RegularizationView(View):
         if date_to:
             qs = qs.filter(date__lte=date_to)
 
-        page = max(int(request.GET.get("page", 1)), 1)
-        page_size = min(int(request.GET.get("page_size", 20)), 100)
-        start = (page - 1) * page_size
+        date_exact = (request.GET.get("date") or "").strip()
+        if date_exact:
+            d_exact = parse_iso_date(date_exact)
+            if d_exact is not None:
+                qs = qs.filter(date=d_exact)
+
+        page, page_size, start = pagination_params(request.GET)
 
         total = qs.count()
         regs = list(qs[start : start + page_size])
@@ -248,10 +235,9 @@ def approve_regularization(request, pk):
     if not can_review_regularization(request.user, reg):
         return JsonResponse({"error": "Not authorized to approve"}, status=403)
 
-    try:
-        body = json.loads(request.body) if request.body else {}
-    except (json.JSONDecodeError, ValueError):
-        body = {}
+    body, err = parse_json_request(request)
+    if err:
+        return err
 
     reg.status = RegularizationStatus.APPROVED
     reg.reviewed_by = request.user
@@ -297,10 +283,9 @@ def reject_regularization(request, pk):
     if not can_review_regularization(request.user, reg):
         return JsonResponse({"error": "Not authorized to reject"}, status=403)
 
-    try:
-        body = json.loads(request.body) if request.body else {}
-    except (json.JSONDecodeError, ValueError):
-        body = {}
+    body, err = parse_json_request(request)
+    if err:
+        return err
 
     remarks = body.get("remarks", "").strip()
     if not remarks:

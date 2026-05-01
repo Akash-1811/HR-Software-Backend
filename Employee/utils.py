@@ -7,6 +7,8 @@ from typing import Any, Optional
 
 import pandas as pd
 
+from Attenova.api_utils import parse_iso_date
+from Organization.access import is_superadmin, user_can_access_office
 from Organization.models import Office
 from Users.models import UserRole
 
@@ -37,19 +39,7 @@ def safe_int(value: Any, default: Optional[int] = None) -> Optional[int]:
 
 def parse_date_request(value: Any) -> Optional[date]:
     """Parse date from JSON/request body (str YYYY-MM-DD or date-like). Returns None if invalid."""
-    if value is None:
-        return None
-    if isinstance(value, date):
-        return value
-    if isinstance(value, str):
-        s = value.strip()[:10]
-        if not s:
-            return None
-        try:
-            return datetime.strptime(s, "%Y-%m-%d").date()
-        except ValueError:
-            return None
-    return None
+    return parse_iso_date(value)
 
 
 def normalize_gender(value: str) -> str:
@@ -103,25 +93,6 @@ def office_belongs_to_organization(office, org_id: int) -> bool:
     return office is not None and office.organization_id == org_id
 
 
-def user_can_access_office(user, office) -> bool:
-    """Manager/Office Admin/Supervisor: only their office. Org Admin: any office in org."""
-    if is_superadmin(user):
-        return True
-    if not office or user.organization_id != office.organization_id:
-        return False
-    if user.role == UserRole.ORG_ADMIN:
-        return True
-    if user.role in (UserRole.OFFICE_ADMIN, UserRole.SUPERVISOR):
-        return getattr(user, "office_id", None) == office.pk
-    if user.role == UserRole.OFFICE_MANAGER:
-        return office.managers.filter(pk=user.id).exists()
-    return False
-
-
-def is_superadmin(user) -> bool:
-    return user.is_superuser
-
-
 def user_can_create_employees(user) -> bool:
     """True if this user's role is allowed to create employees."""
     if is_superadmin(user):
@@ -167,11 +138,14 @@ def allowed_designations_for_user(user) -> list:
 
 def employee_payload(emp) -> dict:
     """Build API payload dict for an employee."""
+    dept = getattr(emp, "department", None)
     return {
         "id": emp.id,
         "organization_id": emp.organization_id,
         "office_id": emp.office_id,
         "shift_id": emp.shift_id,
+        "department_id": emp.department_id,
+        "department_name": dept.name if dept else "",
         "emp_code": emp.emp_code,
         "name": emp.name,
         "designation": emp.designation or "",
@@ -207,18 +181,22 @@ def user_can_access_employee(user, emp) -> bool:
 def get_employees_queryset(user):
     """Manager/Office Admin/Supervisor: only their office(s). Org Admin: all in org (then apply_list_filters can narrow by office_id)."""
     if is_superadmin(user):
-        return Employee.objects.select_related("organization", "office")
+        return Employee.objects.select_related("organization", "office", "department", "shift")
     if user.role == UserRole.ORG_ADMIN and user.organization_id:
-        return Employee.objects.filter(organization_id=user.organization_id).select_related("organization", "office")
+        return Employee.objects.filter(organization_id=user.organization_id).select_related(
+            "organization", "office", "department", "shift"
+        )
     if user.role in (UserRole.OFFICE_ADMIN, UserRole.SUPERVISOR):
         if not getattr(user, "office_id", None) or not user.organization_id:
             return Employee.objects.none()
         return Employee.objects.filter(
             organization_id=user.organization_id,
             office_id=user.office_id,
-        ).select_related("organization", "office")
+        ).select_related("organization", "office", "department", "shift")
     if user.role == UserRole.OFFICE_MANAGER:
-        return Employee.objects.filter(office__managers=user).select_related("organization", "office")
+        return Employee.objects.filter(office__managers=user).select_related(
+            "organization", "office", "department", "shift"
+        )
     return Employee.objects.none()
 
 

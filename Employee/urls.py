@@ -1,4 +1,5 @@
 from django.urls import path
+from Employee.department_views import DepartmentView
 from Employee.views import (
     EmployeeView,
     designation_list,
@@ -10,6 +11,8 @@ from Employee.views import (
 
 urlpatterns = [
     path("designations/", designation_list, name="employee-designations"),
+    path("departments/", DepartmentView.as_view(), name="department-list-create"),
+    path("departments/<int:pk>/", DepartmentView.as_view(), name="department-detail"),
     path("check-duplicate/", check_employee_duplicate, name="employee-check-duplicate"),
     path("create-with-login/", create_employee_with_login, name="employee-create-with-login"),
     path("import/", employee_import, name="employee-import"),

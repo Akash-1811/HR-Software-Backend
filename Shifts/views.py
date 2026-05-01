@@ -1,13 +1,14 @@
-import json
 from datetime import datetime
 
 from django.core.exceptions import ValidationError
+from django.db import transaction
 from django.http import JsonResponse
 from django.views import View
 from django.views.decorators.csrf import csrf_exempt
 from django.utils.decorators import method_decorator
 
-from Organization.views import _get_offices_queryset, _user_can_access_office
+from Attenova.api_utils import parse_json_request
+from Organization.access import get_offices_queryset, user_can_access_office
 from Shifts.models import Shift
 from Users.auth_utils import require_auth
 
@@ -23,13 +24,14 @@ def _shift_payload(shift):
         "grace_minutes": shift.grace_minutes,
         "is_night_shift": shift.is_night_shift,
         "is_active": shift.is_active,
+        "is_default": shift.is_default,
         "created_at": shift.created_at.isoformat() if shift.created_at else None,
     }
 
 
 def _get_shifts_queryset(user):
     """Shifts the user can access (via offices they can access)."""
-    offices = _get_offices_queryset(user)
+    offices = get_offices_queryset(user)
     return Shift.objects.filter(office__in=offices).select_related("office")
 
 
@@ -94,16 +96,15 @@ class ShiftView(View):
         shift = Shift.objects.filter(pk=pk).select_related("office").first()
         if not shift:
             return JsonResponse({"error": "Not found"}, status=404)
-        if not _user_can_access_office(request.user, shift.office):
+        if not user_can_access_office(request.user, shift.office):
             return JsonResponse({"error": "Not found"}, status=404)
         return JsonResponse(_shift_payload(shift), status=200)
 
     def _create(self, request):
         user = request.user
-        try:
-            body = json.loads(request.body) if request.body else {}
-        except json.JSONDecodeError:
-            return JsonResponse({"error": "Invalid JSON"}, status=400)
+        body, err = parse_json_request(request)
+        if err:
+            return err
 
         office_id = body.get("office_id")
         name = (body.get("name") or "").strip()
@@ -112,6 +113,7 @@ class ShiftView(View):
         grace_minutes = max(0, int(body.get("grace_minutes") or 0))
         is_night_shift = bool(body.get("is_night_shift", False))
         is_active = bool(body.get("is_active", True))
+        is_default = bool(body.get("is_default", False))
 
         if not office_id:
             return JsonResponse({"error": "office_id is required"}, status=400)
@@ -131,25 +133,29 @@ class ShiftView(View):
         office = Office.objects.filter(pk=office_id).first()
         if not office:
             return JsonResponse({"error": "Office not found"}, status=404)
-        if not _user_can_access_office(user, office):
+        if not user_can_access_office(user, office):
             return JsonResponse({"error": "Not found"}, status=404)
 
-        try:
-            shift = Shift(
-                office=office,
-                name=name,
-                start_time=start_time,
-                end_time=end_time,
-                grace_minutes=grace_minutes,
-                is_night_shift=is_night_shift,
-                is_active=is_active,
-                created_by=user,
-                updated_by=user,
-            )
-            shift.full_clean()
-            shift.save()
-        except ValidationError as e:
-            return JsonResponse({"error": str(e)}, status=400)
+        with transaction.atomic():
+            if is_default:
+                Shift.objects.filter(office_id=office_id).update(is_default=False)
+            try:
+                shift = Shift(
+                    office=office,
+                    name=name,
+                    start_time=start_time,
+                    end_time=end_time,
+                    grace_minutes=grace_minutes,
+                    is_night_shift=is_night_shift,
+                    is_active=is_active,
+                    is_default=is_default,
+                    created_by=user,
+                    updated_by=user,
+                )
+                shift.full_clean()
+                shift.save()
+            except ValidationError as e:
+                return JsonResponse({"error": str(e)}, status=400)
         return JsonResponse(_shift_payload(shift), status=201)
 
     def _update(self, request, pk):
@@ -157,13 +163,12 @@ class ShiftView(View):
         shift = Shift.objects.filter(pk=pk).select_related("office").first()
         if not shift:
             return JsonResponse({"error": "Not found"}, status=404)
-        if not _user_can_access_office(user, shift.office):
+        if not user_can_access_office(user, shift.office):
             return JsonResponse({"error": "Not found"}, status=404)
 
-        try:
-            body = json.loads(request.body) if request.body else {}
-        except json.JSONDecodeError:
-            return JsonResponse({"error": "Invalid JSON"}, status=400)
+        body, err = parse_json_request(request)
+        if err:
+            return err
 
         update_fields = []
         if "name" in body:
@@ -190,14 +195,20 @@ class ShiftView(View):
         if "is_active" in body:
             shift.is_active = bool(body["is_active"])
             update_fields.append("is_active")
+        if "is_default" in body:
+            shift.is_default = bool(body["is_default"])
+            update_fields.append("is_default")
 
         shift.updated_by = user
         update_fields.extend(["updated_at", "updated_by"])
-        try:
-            shift.full_clean()
-            shift.save(update_fields=update_fields)
-        except ValidationError as e:
-            return JsonResponse({"error": str(e)}, status=400)
+        with transaction.atomic():
+            if shift.is_default:
+                Shift.objects.filter(office_id=shift.office_id).exclude(pk=shift.pk).update(is_default=False)
+            try:
+                shift.full_clean()
+                shift.save(update_fields=update_fields)
+            except ValidationError as e:
+                return JsonResponse({"error": str(e)}, status=400)
         return JsonResponse(_shift_payload(shift), status=200)
 
     def _delete(self, request, pk):
@@ -205,7 +216,7 @@ class ShiftView(View):
         shift = Shift.objects.filter(pk=pk).select_related("office").first()
         if not shift:
             return JsonResponse({"error": "Not found"}, status=404)
-        if not _user_can_access_office(user, shift.office):
+        if not user_can_access_office(user, shift.office):
             return JsonResponse({"error": "Not found"}, status=404)
         shift.delete()
         return JsonResponse({"message": "Deleted"}, status=200)

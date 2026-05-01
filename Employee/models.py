@@ -45,6 +45,13 @@ class Employee(models.Model):
         blank=True,
         related_name="employees",
     )
+    department = models.ForeignKey(
+        "Organization.Department",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="employees",
+    )
     emp_code = models.CharField(max_length=64)  # ESSL user ID, unique per org
     name = models.CharField(max_length=255)
     designation = models.CharField(max_length=32, choices=Designation.choices, blank=True)
@@ -117,3 +124,5 @@ class Employee(models.Model):
             raise ValidationError({"office": "Office must belong to the same organization."})
         if self.shift_id and self.office_id and self.shift.office_id != self.office_id:
             raise ValidationError({"shift": "Shift must belong to the same office as the employee."})
+        if self.department_id and self.office_id and self.department.office_id != self.office_id:
+            raise ValidationError({"department": "Department must belong to the same office as the employee."})

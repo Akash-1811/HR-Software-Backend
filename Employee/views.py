@@ -1,5 +1,4 @@
 import io
-import json
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import pandas as pd
@@ -14,6 +13,8 @@ from django.views.decorators.http import require_http_methods
 from django.views.decorators.csrf import csrf_exempt
 from django.utils.decorators import method_decorator
 
+from Attenova.api_utils import parse_json_request
+from Employee.department_views import resolve_optional_department
 from Employee.constants import (
     ALLOWED_CREATE_DESIGNATIONS,
     ALLOWED_CREATE_WITH_LOGIN_DESIGNATIONS,
@@ -66,10 +67,9 @@ def create_employee_with_login(request):
     Creates a User (with login) and linked Employee for Manager or Supervisor.
     """
     user = request.user
-    try:
-        body = json.loads(request.body) if request.body else {}
-    except (json.JSONDecodeError, TypeError):
-        return JsonResponse({"error": "Invalid JSON"}, status=400)
+    body, err = parse_json_request(request)
+    if err:
+        return err
 
     org_id = safe_int(body.get("organization_id"))
     office_id = safe_int(body.get("office_id"))
@@ -152,6 +152,10 @@ def create_employee_with_login(request):
         if not shift:
             return JsonResponse({"error": "Shift not found or must belong to the same office"}, status=400)
 
+    dept, derr = resolve_optional_department(body.get("department_id"), office_id)
+    if derr:
+        return derr
+
     user_role = UserRole.OFFICE_MANAGER if designation == "MANAGER" else UserRole.SUPERVISOR
     try:
         with transaction.atomic():
@@ -171,6 +175,7 @@ def create_employee_with_login(request):
                 organization_id=org_id,
                 office=office,
                 shift=shift,
+                department=dept,
                 emp_code=emp_code,
                 name=name,
                 designation=designation,
@@ -226,7 +231,7 @@ class EmployeeView(View):
         return JsonResponse({"employees": [employee_payload(e) for e in employees]}, status=200)
 
     def _detail(self, request, pk):
-        emp = Employee.objects.filter(pk=pk).select_related("organization", "office").first()
+        emp = Employee.objects.filter(pk=pk).select_related("organization", "office", "department").first()
         if not emp:
             return JsonResponse({"error": "Not found"}, status=404)
         # Return 404 (not 403) so we don't reveal existence to unauthorized users
@@ -238,11 +243,10 @@ class EmployeeView(View):
         """Parse JSON or multipart form data."""
         if "multipart/form-data" in (request.content_type or ""):
             return request.POST, request.FILES
-        try:
-            body = json.loads(request.body) if request.body else {}
-        except json.JSONDecodeError:
+        data, err = parse_json_request(request)
+        if err:
             return None, None
-        return body, {}
+        return data, {}
 
     def _create(self, request):
         user = request.user
@@ -310,12 +314,17 @@ class EmployeeView(View):
             if not shift:
                 return JsonResponse({"error": "Shift not found or must belong to the same office"}, status=400)
 
+        dept, derr = resolve_optional_department(body.get("department_id"), office_id)
+        if derr:
+            return derr
+
         profile_pic = files.get("profile_pic") if files else None
         try:
             emp = Employee(
                 organization_id=org_id,
                 office=office,
                 shift=shift,
+                department=dept,
                 emp_code=emp_code,
                 name=name,
                 designation=designation,
@@ -338,7 +347,7 @@ class EmployeeView(View):
 
     def _update(self, request, pk):
         user = request.user
-        emp = Employee.objects.filter(pk=pk).select_related("shift").first()
+        emp = Employee.objects.filter(pk=pk).select_related("shift", "department").first()
         if not emp:
             return JsonResponse({"error": "Not found"}, status=404)
         if not user_can_access_employee(user, emp):
@@ -388,17 +397,33 @@ class EmployeeView(View):
                 emp.shift = None
             update_fields.add("shift")
         if "office_id" in body:
-            office_id = safe_int(body.get("office_id"))
-            office = Office.objects.filter(pk=office_id).prefetch_related("managers").first() if office_id else None
+            office_id_new = safe_int(body.get("office_id"))
+            office = Office.objects.filter(pk=office_id_new).prefetch_related("managers").first() if office_id_new else None
             if not office_belongs_to_organization(office, emp.organization_id):
                 return JsonResponse({"error": "Office not found or must belong to same organization"}, status=400)
             if not user_can_access_office(user, office):
                 return JsonResponse({"error": "You can only assign employees to your office"}, status=403)
-            emp.office_id = office_id
+            emp.office_id = office_id_new
             update_fields.add("office_id")
-            if emp.shift_id and emp.shift.office_id != office_id:
+            if emp.shift_id and emp.shift.office_id != office_id_new:
                 emp.shift = None
                 update_fields.add("shift")
+            if emp.department_id and emp.department.office_id != office_id_new:
+                emp.department = None
+                update_fields.add("department")
+        if "department_id" in body:
+            raw = body.get("department_id")
+            if raw is None or raw == "":
+                emp.department = None
+            else:
+                dept, derr = resolve_optional_department(raw, emp.office_id)
+                if derr:
+                    return derr
+                emp.department = dept
+            update_fields.add("department")
+        if emp.department_id and emp.department.office_id != emp.office_id:
+            emp.department = None
+            update_fields.add("department")
         if "is_active" in body:
             emp.is_active = bool(body["is_active"])
             update_fields.add("is_active")
@@ -535,6 +560,8 @@ def employee_export(request):
                 "phone_number": emp.phone_number or "",
                 "government_id_type": emp.government_id_type or "",
                 "government_id_value": emp.government_id_value or "",
+                "department_id": emp.department_id or "",
+                "department_name": emp.department.name if emp.department_id else "",
                 "office_id": emp.office_id,
                 "organization_id": emp.organization_id,
                 "is_active": emp.is_active,
@@ -555,6 +582,8 @@ def employee_export(request):
                 "phone_number",
                 "government_id_type",
                 "government_id_value",
+                "department_id",
+                "department_name",
                 "office_id",
                 "organization_id",
                 "is_active",

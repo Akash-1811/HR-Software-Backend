@@ -32,6 +32,9 @@ urlpatterns = [
     path("api/shifts/", include("Shifts.urls")),
     path("api/biometric/", include("Biometric.urls")),
     path("api/attendance/", include("Attendance.urls")),
+    path("api/dashboard/", include("dashboard.urls")),
+    path("api/reports/", include("Reports.urls")),
+    path("api/contact/", include("marketing.urls")),
     path("api/notifications/", include("Notifications.urls")),
 ]
 if settings.DEBUG:

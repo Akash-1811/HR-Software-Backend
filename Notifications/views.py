@@ -4,6 +4,8 @@ from django.views import View
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 
+from Attenova.api_utils import pagination_params
+
 from Users.auth_utils import require_auth
 from Notifications.models import Notification, DISPLAY_TYPE_MAP
 
@@ -40,9 +42,7 @@ class NotificationView(View):
         if ntype:
             qs = qs.filter(notification_type=ntype)
 
-        page = max(int(request.GET.get("page", 1)), 1)
-        page_size = min(int(request.GET.get("page_size", 20)), 100)
-        start = (page - 1) * page_size
+        page, page_size, start = pagination_params(request.GET)
 
         total = qs.count()
         notifications = list(qs[start : start + page_size])

@@ -81,3 +81,31 @@ class Office(models.Model):
 
     def __str__(self):
         return f"{self.name} ({self.organization.name})"
+
+
+class Department(models.Model):
+    """Department within an office (e.g. HR, Finance). Scoped to office for multi-site orgs."""
+
+    office = models.ForeignKey(
+        Office,
+        on_delete=models.CASCADE,
+        related_name="departments",
+    )
+    name = models.CharField(max_length=255)
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "department"
+        ordering = ["office", "name"]
+        verbose_name_plural = "departments"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["office", "name"],
+                name="department_office_name_unique",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.name} ({self.office.name})"

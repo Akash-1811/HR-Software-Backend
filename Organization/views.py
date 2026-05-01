@@ -1,4 +1,3 @@
-import json
 from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.db import IntegrityError
@@ -7,6 +6,8 @@ from django.views import View
 from django.views.decorators.csrf import csrf_exempt
 from django.utils.decorators import method_decorator
 
+from Attenova.api_utils import parse_json_request
+from Organization.access import get_offices_queryset, is_superadmin, user_can_access_office
 from Organization.models import Organization, Office
 from Users.models import User, UserRole
 from Users.auth_utils import require_auth
@@ -45,11 +46,6 @@ def _org_payload(org):
     return payload
 
 
-def _is_superadmin(user):
-    """SuperAdmin = is_superuser (Django superuser)."""
-    return user.is_superuser
-
-
 def _office_payload(office):
     payload = {
         "id": office.id,
@@ -63,39 +59,6 @@ def _office_payload(office):
         "created_at": office.created_at.isoformat() if office.created_at else None,
     }
     return payload
-
-
-def _user_can_access_office(user, office):
-    """True if user can view/edit this office."""
-    if _is_superadmin(user):
-        return True
-    if office.managers.filter(pk=user.id).exists():
-        return True
-    if user.organization_id and office.organization_id == user.organization_id:
-        if getattr(user, "office_id", None) and user.role in (
-            UserRole.OFFICE_ADMIN,
-            UserRole.SUPERVISOR,
-        ):
-            return office.pk == user.office_id
-        return True
-    return False
-
-
-def _get_offices_queryset(user):
-    """Offices the user can access. Org Admin: all in org. Office Admin/Supervisor: only their office if set. Manager: only offices they manage."""
-    base = Office.objects.select_related("organization").prefetch_related("managers")
-    if _is_superadmin(user):
-        return base.filter(organization__is_active=True)
-    if user.role == UserRole.OFFICE_MANAGER:
-        return base.filter(managers=user)
-    if user.organization_id:
-        if getattr(user, "office_id", None) and user.role in (
-            UserRole.OFFICE_ADMIN,
-            UserRole.SUPERVISOR,
-        ):
-            return base.filter(pk=user.office_id, organization_id=user.organization_id)
-        return base.filter(organization_id=user.organization_id)
-    return base.none()
 
 
 @method_decorator(csrf_exempt, name="dispatch")
@@ -128,7 +91,7 @@ class OrganizationView(View):
 
     def _list(self, request):
         user = request.user
-        if _is_superadmin(user):
+        if is_superadmin(user):
             orgs = Organization.objects.filter(is_active=True).select_related("created_by").order_by("name")
             return JsonResponse({"organizations": [_org_payload(o) for o in orgs]}, status=200)
         if not user.organization_id:
@@ -143,17 +106,16 @@ class OrganizationView(View):
         org = Organization.objects.filter(pk=pk).select_related("created_by").first()
         if not org:
             return JsonResponse({"error": "Not found"}, status=404)
-        if not _is_superadmin(user) and user.organization_id != org.id:
+        if not is_superadmin(user) and user.organization_id != org.id:
             return JsonResponse({"error": "Not found"}, status=404)
         return JsonResponse(_org_payload(org), status=200)
 
     def _create(self, request):
-        if not _is_superadmin(request.user):
+        if not is_superadmin(request.user):
             return JsonResponse({"error": "Only SuperAdmin can create organization"}, status=403)
-        try:
-            body = json.loads(request.body) if request.body else {}
-        except json.JSONDecodeError:
-            return JsonResponse({"error": "Invalid JSON"}, status=400)
+        body, err = parse_json_request(request)
+        if err:
+            return err
 
         owner = body.get("owner") or {}
         org_data = body.get("organization") or {}
@@ -196,7 +158,7 @@ class OrganizationView(View):
                 )
                 user.organization = organization
                 user.save(update_fields=["organization"])
-        except Exception as e:
+        except (IntegrityError, ValidationError, ValueError, TypeError) as e:
             return JsonResponse({"error": str(e)}, status=400)
 
         return JsonResponse(
@@ -206,16 +168,15 @@ class OrganizationView(View):
 
     def _update(self, request, pk):
         user = request.user
-        if not _is_superadmin(user):
+        if not is_superadmin(user):
             return JsonResponse({"error": "Only SuperAdmin can update organization"}, status=403)
         org = Organization.objects.filter(pk=pk).select_related("created_by").first()
         if not org:
             return JsonResponse({"error": "Not found"}, status=404)
 
-        try:
-            body = json.loads(request.body) if request.body else {}
-        except json.JSONDecodeError:
-            return JsonResponse({"error": "Invalid JSON"}, status=400)
+        body, err = parse_json_request(request)
+        if err:
+            return err
 
         update_fields = []
         for field in ["name", "address", "city", "state", "country", "pincode", "phone_number", "email"]:
@@ -236,7 +197,7 @@ class OrganizationView(View):
 
     def _delete(self, request, pk):
         user = request.user
-        if not _is_superadmin(user):
+        if not is_superadmin(user):
             return JsonResponse({"error": "Only SuperAdmin can delete organization"}, status=403)
         org = Organization.objects.filter(pk=pk).first()
         if not org:
@@ -275,12 +236,12 @@ class OfficeView(View):
 
     def _list(self, request):
         user = request.user
-        offices = _get_offices_queryset(user).order_by("organization", "name")
+        offices = get_offices_queryset(user).order_by("organization", "name")
         org_id = request.GET.get("organization_id")
         if org_id:
             try:
                 org_id = int(org_id)
-                if _is_superadmin(user) or user.organization_id == org_id:
+                if is_superadmin(user) or user.organization_id == org_id:
                     offices = offices.filter(organization_id=org_id)
                 else:
                     offices = offices.none()
@@ -288,7 +249,7 @@ class OfficeView(View):
                 pass
         # Org Admin: can filter by office_id to see a specific office
         office_id = request.GET.get("office_id")
-        if office_id and (user.role == UserRole.ORG_ADMIN or _is_superadmin(user)):
+        if office_id and (user.role == UserRole.ORG_ADMIN or is_superadmin(user)):
             try:
                 offices = offices.filter(pk=int(office_id))
             except (TypeError, ValueError):
@@ -299,19 +260,19 @@ class OfficeView(View):
         office = Office.objects.filter(pk=pk).prefetch_related("managers").first()
         if not office:
             return JsonResponse({"error": "Not found"}, status=404)
-        if not _user_can_access_office(request.user, office):
+        if not user_can_access_office(request.user, office):
             return JsonResponse({"error": "Not found"}, status=404)
         return JsonResponse(_office_payload(office), status=200)
 
     def _create(self, request):
         """Create office with office admin user. Body: organization_id, office: { name, ... }, admin: { email, password, ... }."""
         user = request.user
-        if not _is_superadmin(user) and not user.organization_id:
+        if not is_superadmin(user) and not user.organization_id:
             return JsonResponse({"error": "Only Super Admin or Org Admin can create offices."}, status=403)
-        try:
-            body = json.loads(request.body) if request.body else {}
-        except json.JSONDecodeError:
-            return JsonResponse({"error": "Invalid JSON"}, status=400)
+
+        body, err = parse_json_request(request)
+        if err:
+            return err
 
         org_id = body.get("organization_id")
         office_data = body.get("office") or {}
@@ -327,7 +288,7 @@ class OfficeView(View):
         org = Organization.objects.filter(pk=org_id).first()
         if not org:
             return JsonResponse({"error": "Organization not found"}, status=404)
-        if not _is_superadmin(user) and user.organization_id != org_id:
+        if not is_superadmin(user) and user.organization_id != org_id:
             return JsonResponse({"error": "Not authorized for this organization"}, status=403)
 
         name = (office_data.get("name") or "").strip()
@@ -405,13 +366,12 @@ class OfficeView(View):
         office = Office.objects.filter(pk=pk).first()
         if not office:
             return JsonResponse({"error": "Not found"}, status=404)
-        if not _user_can_access_office(user, office):
+        if not user_can_access_office(user, office):
             return JsonResponse({"error": "Not found"}, status=404)
 
-        try:
-            body = json.loads(request.body) if request.body else {}
-        except json.JSONDecodeError:
-            return JsonResponse({"error": "Invalid JSON"}, status=400)
+        body, err = parse_json_request(request)
+        if err:
+            return err
 
         update_fields = []
         for field in ["name", "location", "full_address"]:
@@ -459,9 +419,9 @@ class OfficeView(View):
         office = Office.objects.filter(pk=pk).first()
         if not office:
             return JsonResponse({"error": "Not found"}, status=404)
-        if not _user_can_access_office(user, office):
+        if not user_can_access_office(user, office):
             return JsonResponse({"error": "Not found"}, status=404)
-        if not _is_superadmin(user) and (
+        if not is_superadmin(user) and (
             user.organization_id != office.organization_id or user.role != UserRole.ORG_ADMIN
         ):
             return JsonResponse({"error": "Only SuperAdmin or org admin can delete"}, status=403)

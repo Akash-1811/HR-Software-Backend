@@ -1,0 +1,68 @@
+%% Attenova — software flow (main paths)
+%% Export PNG/SVG: https://mermaid.live — paste this file, then Actions → Export
+
+flowchart TB
+  subgraph clients [Clients]
+    SPA[Web_or_mobile_SPA]
+  end
+
+  subgraph api [Django_JSON_API]
+    AUTH["/api/auth JWT_Bearer"]
+    ORG["/api/organizations /api/offices"]
+    EMP["/api/employees"]
+    SH["/api/shifts"]
+    BIO["/api/biometric devices + essl-logs"]
+    ATT["/api/attendance"]
+    REP["/api/reports"]
+    NOTIF["/api/notifications"]
+  end
+
+  subgraph cron [django-crontab]
+    C1["every_5_min run_attendance_sync"]
+    C2["daily_1am send_daily_attendance_report"]
+  end
+
+  subgraph pipeline [Attendance_pipeline]
+    ESSL[(ESSL_MySQL_optional)]
+    DUMMY[DummyEsslBiometricAttendanceData]
+    PROC[BiometricAttendanceProcessor]
+    ATTREC[Attendance + AttendancePunch]
+  end
+
+  subgraph data [Primary_database]
+    DB[(SQLite_PostgreSQL_or_MySQL)]
+  end
+
+  subgraph mail [Email]
+    SMTP[SMTP]
+  end
+
+  SPA --> AUTH
+  SPA --> ORG
+  SPA --> EMP
+  SPA --> SH
+  SPA --> BIO
+  SPA --> ATT
+  SPA --> REP
+  SPA --> NOTIF
+
+  AUTH --> DB
+  ORG --> DB
+  EMP --> DB
+  SH --> DB
+  BIO --> DB
+  ATT --> DB
+  REP --> DB
+  NOTIF --> DB
+
+  C1 --> ESSL
+  ESSL --> DUMMY
+  C1 --> DUMMY
+  DUMMY --> PROC
+  PROC --> ATTREC
+  ATTREC --> DB
+
+  C2 --> REP
+  REP --> SMTP
+
+  BIO -.->|read_only_pymysql| ESSL

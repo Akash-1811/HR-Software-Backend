@@ -15,6 +15,7 @@ class Shift(models.Model):
     end_time = models.TimeField()
     grace_minutes = models.PositiveSmallIntegerField(default=0)
     is_night_shift = models.BooleanField(default=False)
+    is_default = models.BooleanField(default=False)
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
     created_by = models.ForeignKey(
@@ -36,6 +37,13 @@ class Shift(models.Model):
     class Meta:
         db_table = "shift"
         ordering = ["office", "name"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["office"],
+                condition=models.Q(is_default=True),
+                name="shift_office_one_default_unique",
+            ),
+        ]
 
     def __str__(self):
         return f"{self.name} ({self.office.name})"

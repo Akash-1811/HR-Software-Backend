@@ -4,7 +4,7 @@ Helper functions for the Biometric app.
 
 from django.conf import settings
 
-from Organization.views import _get_offices_queryset
+from Organization.access import get_offices_queryset
 
 from Biometric.models import BiometricDevice
 
@@ -17,6 +17,11 @@ def device_payload(device):
         "office_name": device.office.name if hasattr(device, "office") and device.office else None,
         "device_id": device.device_id,
         "name": device.name or "",
+        "serial_number": device.serial_number or "",
+        "ip_address": device.ip_address or "",
+        "device_location": device.device_location or "",
+        "device_direction": device.device_direction or "",
+        "device_type": device.device_type or "",
         "is_active": device.is_active,
         "created_at": device.created_at.isoformat() if device.created_at else None,
         "updated_at": device.updated_at.isoformat() if device.updated_at else None,
@@ -25,7 +30,7 @@ def device_payload(device):
 
 def get_devices_queryset(user):
     """Biometric devices in offices the user can access."""
-    offices = _get_offices_queryset(user)
+    offices = get_offices_queryset(user)
     return BiometricDevice.objects.filter(office__in=offices).select_related("office")
 
 

@@ -83,7 +83,9 @@ INSTALLED_APPS = [
     "Biometric",
     "Attendance",
     "Reports",
+    "dashboard",
     "Notifications",
+    "marketing",
 ]
 
 # Custom user model (email-based, org-scoped roles)
@@ -172,9 +174,10 @@ ESSL_DEVICE_LOGS_TABLE = os.environ.get("ESSL_DEVICE_LOGS_TABLE", "DeviceLogs_2_
 ESSL_SYNC_BATCH_SIZE = int(os.environ.get("ESSL_SYNC_BATCH_SIZE", "5000"))
 ESSL_SYNC_MAX_BATCHES = int(os.environ.get("ESSL_SYNC_MAX_BATCHES", "20"))
 
-# Cron: run attendance sync every 5 minutes (use: python manage.py crontab add)
+# Cron: run attendance sync every 5 minutes; daily report at 1 AM
 CRONJOBS = [
     ("*/5 * * * *", "Biometric.cron.run_attendance_sync"),
+    ("0 1 * * *", "django.core.management.call_command", ["send_daily_attendance_report"]),
 ]
 
 # Password validation
@@ -207,6 +210,24 @@ USE_I18N = True
 
 USE_TZ = True
 
+
+# Email (for daily attendance report, notifications, etc.)
+EMAIL_BACKEND = os.environ.get(
+    "EMAIL_BACKEND",
+    "django.core.mail.backends.console.EmailBackend",
+)
+EMAIL_HOST = os.environ.get("EMAIL_HOST", "smtp.gmail.com")
+EMAIL_PORT = int(os.environ.get("EMAIL_PORT", "587"))
+EMAIL_USE_TLS = env_bool("EMAIL_USE_TLS", default=True)
+EMAIL_HOST_USER = os.environ.get("EMAIL_HOST_USER", "")
+EMAIL_HOST_PASSWORD = os.environ.get("EMAIL_HOST_PASSWORD", "")
+DEFAULT_FROM_EMAIL = os.environ.get("DEFAULT_FROM_EMAIL", "Attenova <noreply@attenova.local>")
+
+# Landing page “Book a demo” submissions (notification recipient).
+DEMO_BOOKING_INBOX = os.environ.get(
+    "DEMO_BOOKING_INBOX",
+    "akashyadav181198@gmail.com",
+).strip()
 
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/5.2/howto/static-files/
