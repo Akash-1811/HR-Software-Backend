@@ -39,10 +39,10 @@ from Employee.utils import (
     safe_int,
     user_can_assign_designation,
     user_can_access_employee,
-    user_can_access_office,
     user_can_create_employees,
     validate_and_prepare_import_row,
 )
+from Organization.access import user_can_access_office
 from Organization.models import Office
 from Shifts.models import Shift
 from Users.auth_utils import require_auth
