@@ -8,7 +8,7 @@ from typing import Any, Optional
 import pandas as pd
 
 from Attenova.api_utils import parse_iso_date
-from Organization.access import is_superadmin, user_can_access_office
+from Organization.access import is_superadmin
 from Organization.models import Office
 from Users.models import UserRole
 

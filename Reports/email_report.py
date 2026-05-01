@@ -15,7 +15,6 @@ from openpyxl.styles import Alignment, Font
 from Organization.models import Office
 from Reports.utils import (
     fetch_attendance_report_rows_for_office,
-    fetch_attendance_report_rows_for_organization,
     get_recipients_for_office,
 )
 

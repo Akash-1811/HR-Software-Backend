@@ -16,7 +16,6 @@ Schedule via cron, e.g. daily at 2 AM:
 from datetime import datetime
 
 from django.core.management.base import BaseCommand
-from django.utils import timezone
 
 from Attendance.processing import BiometricAttendanceProcessor
 
