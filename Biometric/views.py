@@ -1,3 +1,5 @@
+import logging
+
 import pymysql
 
 from django.conf import settings
@@ -8,7 +10,7 @@ from django.views import View
 from django.views.decorators.csrf import csrf_exempt
 
 from Attenova.api_utils import parse_json_request
-from Organization.access import user_can_access_office
+from Organization.access import is_superadmin, user_can_access_office
 from Users.auth_utils import require_auth
 
 from Biometric.models import BiometricDevice
@@ -17,10 +19,26 @@ from Biometric.utils import (
     format_time_for_essl,
     get_devices_queryset,
     get_essl_conn_params,
+    get_essl_logs_table,
 )
 
 _ALLOWED_DEVICE_TYPE = {x[0] for x in BiometricDevice.DeviceType.choices}
 _ALLOWED_DEVICE_DIRECTION = {x[0] for x in BiometricDevice.DeviceDirection.choices}
+logger = logging.getLogger(__name__)
+
+
+def _essl_log_device_ids() -> list[int]:
+    raw = getattr(settings, "ESSL_LOG_DEVICE_IDS", "3,9")
+    device_ids: list[int] = []
+    for value in str(raw).split(","):
+        value = value.strip()
+        if not value:
+            continue
+        try:
+            device_ids.append(int(value))
+        except ValueError:
+            logger.warning("Ignoring invalid ESSL_LOG_DEVICE_IDS value: %s", value)
+    return device_ids
 
 
 @method_decorator(csrf_exempt, name="dispatch")
@@ -219,10 +237,27 @@ def essl_device_logs(request):
     Returns attendance logs from ESSL DB (grouped by employee/date): employee, device,
     log_date, direction, check_in_time, check_out_time, hours_worked.
     """
+    if not is_superadmin(request.user):
+        return JsonResponse({"error": "Not authorized"}, status=403)
+
     if "essl_db" not in settings.DATABASES:
         return JsonResponse({"error": "essl_db not configured"}, status=500)
 
-    sql = """
+    try:
+        table = get_essl_logs_table()
+    except ValueError:
+        logger.exception("Invalid ESSL_DEVICE_LOGS_TABLE configured")
+        return JsonResponse({"error": "Invalid ESSL logs table configuration"}, status=500)
+
+    device_ids = _essl_log_device_ids()
+    device_filter = ""
+    query_params: list[int] = []
+    if device_ids:
+        placeholders = ", ".join(["%s"] * len(device_ids))
+        device_filter = f"AND D.DeviceId IN ({placeholders})"
+        query_params.extend(device_ids)
+
+    sql = f"""
         SELECT 
             E.EmployeeCode,
             E.EmployeeName,
@@ -235,10 +270,11 @@ def essl_device_logs(request):
                 MIN(CASE WHEN D.Direction = 'IN' THEN D.LogDate END),
                 MAX(CASE WHEN D.Direction = 'OUT' THEN D.LogDate END)
             ) / 3600.0, 2) AS HoursWorked
-        FROM DeviceLogs_2_2026 D
+        FROM `{table}` D
         JOIN Employees E 
             ON E.EmployeeCodeInDevice = D.UserId
-        WHERE D.DeviceId IN (3, 9)
+        WHERE 1 = 1
+            {device_filter}
         GROUP BY E.EmployeeCode, E.EmployeeName, D.DeviceId, CAST(D.LogDate AS DATE)
         ORDER BY LogDate DESC, E.EmployeeName ASC
         LIMIT 500
@@ -246,10 +282,11 @@ def essl_device_logs(request):
     try:
         with pymysql.connect(**get_essl_conn_params()) as conn:
             with conn.cursor() as cursor:
-                cursor.execute(sql)
+                cursor.execute(sql, query_params)
                 rows = cursor.fetchall()
-    except Exception as e:
-        return JsonResponse({"error": str(e)}, status=500)
+    except Exception:
+        logger.exception("Failed to fetch ESSL device logs")
+        return JsonResponse({"error": "Failed to fetch ESSL device logs"}, status=500)
 
     data = [
         {

@@ -29,7 +29,12 @@ def get_user_from_request(request):
     if not token:
         return None
     try:
-        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[JWT_ALGORITHM])
+        payload = jwt.decode(
+            token,
+            settings.SECRET_KEY,
+            algorithms=[JWT_ALGORITHM],
+            options={"require": ["exp"]},
+        )
         return User.objects.get(pk=payload["user_id"], is_active=True)
     except (jwt.InvalidTokenError, User.DoesNotExist, KeyError):
         return None

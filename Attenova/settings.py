@@ -22,12 +22,15 @@ load_dotenv()
 
 
 def env_bool(key: str, default: bool = False) -> bool:
-    """Return True if env var is one of 'true', '1', 'yes' (case-insensitive)."""
-    val = os.environ.get(key, "").lower()
+    """Parse a boolean environment variable with explicit false support."""
+    raw = os.environ.get(key)
+    if raw is None or raw.strip() == "":
+        return default
+    val = raw.strip().lower()
     if val in ("true", "1", "yes"):
         return True
-    if val in ("false", "0", "no", ""):
-        return default
+    if val in ("false", "0", "no"):
+        return False
     return default
 
 
@@ -49,6 +52,8 @@ if not SECRET_KEY:
 DEBUG = env_bool("DEBUG", default=True)
 
 ALLOWED_HOSTS = env_list("ALLOWED_HOSTS", default=[])
+if not DEBUG and not ALLOWED_HOSTS:
+    raise ImproperlyConfigured("Set ALLOWED_HOSTS when DEBUG is false.")
 
 # CORS: set CORS_ALLOWED_ORIGINS to your frontend URL(s). When DEBUG, default includes localhost:8080.
 _cors_origins = env_list("CORS_ALLOWED_ORIGINS") or (
@@ -62,6 +67,20 @@ CORS_ALLOW_CREDENTIALS = True
 CSRF_TRUSTED_ORIGINS = env_list("CSRF_TRUSTED_ORIGINS") or (
     ["http://localhost:8080", "http://127.0.0.1:8080"] if DEBUG else []
 )
+
+# Security defaults are conservative in local development and explicit in production.
+# Set the env vars below from the deployment platform instead of baking assumptions
+# about TLS termination into the image.
+SESSION_COOKIE_SECURE = env_bool("SESSION_COOKIE_SECURE", default=not DEBUG)
+CSRF_COOKIE_SECURE = env_bool("CSRF_COOKIE_SECURE", default=not DEBUG)
+SECURE_SSL_REDIRECT = env_bool("SECURE_SSL_REDIRECT", default=False)
+SECURE_HSTS_SECONDS = int(os.environ.get("SECURE_HSTS_SECONDS", "0" if DEBUG else "31536000"))
+SECURE_HSTS_INCLUDE_SUBDOMAINS = env_bool("SECURE_HSTS_INCLUDE_SUBDOMAINS", default=False)
+SECURE_HSTS_PRELOAD = env_bool("SECURE_HSTS_PRELOAD", default=False)
+SECURE_CONTENT_TYPE_NOSNIFF = True
+X_FRAME_OPTIONS = os.environ.get("X_FRAME_OPTIONS", "DENY")
+if env_bool("USE_X_FORWARDED_PROTO", default=False):
+    SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 
 
 # Application definition
@@ -85,7 +104,9 @@ INSTALLED_APPS = [
     "Reports",
     "dashboard",
     "Notifications",
+    "Leaves",
     "marketing",
+    "ai_assistant",
 ]
 
 # Custom user model (email-based, org-scoped roles)
@@ -171,6 +192,7 @@ if os.environ.get("ESSL_DB_NAME"):
 
 # ESSL biometric sync (tunable via env)
 ESSL_DEVICE_LOGS_TABLE = os.environ.get("ESSL_DEVICE_LOGS_TABLE", "DeviceLogs_2_2026")
+ESSL_LOG_DEVICE_IDS = os.environ.get("ESSL_LOG_DEVICE_IDS", "3,9")
 ESSL_SYNC_BATCH_SIZE = int(os.environ.get("ESSL_SYNC_BATCH_SIZE", "5000"))
 ESSL_SYNC_MAX_BATCHES = int(os.environ.get("ESSL_SYNC_MAX_BATCHES", "20"))
 
@@ -224,10 +246,7 @@ EMAIL_HOST_PASSWORD = os.environ.get("EMAIL_HOST_PASSWORD", "")
 DEFAULT_FROM_EMAIL = os.environ.get("DEFAULT_FROM_EMAIL", "Attenova <noreply@attenova.local>")
 
 # Landing page “Book a demo” submissions (notification recipient).
-DEMO_BOOKING_INBOX = os.environ.get(
-    "DEMO_BOOKING_INBOX",
-    "akashyadav181198@gmail.com",
-).strip()
+DEMO_BOOKING_INBOX = os.environ.get("DEMO_BOOKING_INBOX", "").strip()
 
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/5.2/howto/static-files/
@@ -240,3 +259,49 @@ MEDIA_ROOT = BASE_DIR / os.environ.get("MEDIA_ROOT", "media")
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
+
+CACHES = {
+    "default": {
+        "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+        "LOCATION": "attenova-default-cache",
+    }
+}
+
+# AI workplace assistant (OpenAI). Disabled when OPENAI_API_KEY is unset.
+OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "").strip()
+OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-4o-mini").strip()
+AI_ASSISTANT_ENABLED = env_bool(
+    "AI_ASSISTANT_ENABLED",
+    default=bool(OPENAI_API_KEY),
+)
+AI_ASSISTANT_MAX_USER_MESSAGE_CHARS = int(os.environ.get("AI_ASSISTANT_MAX_USER_MESSAGE_CHARS", "6000"))
+AI_ASSISTANT_RATE_LIMIT_PER_MINUTE = int(os.environ.get("AI_ASSISTANT_RATE_LIMIT_PER_MINUTE", "20"))
+
+LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO")
+
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {
+        "standard": {
+            "format": "%(asctime)s %(levelname)s [%(name)s] %(message)s",
+        },
+    },
+    "handlers": {
+        "console": {
+            "class": "logging.StreamHandler",
+            "formatter": "standard",
+        },
+    },
+    "root": {
+        "handlers": ["console"],
+        "level": LOG_LEVEL,
+    },
+    "loggers": {
+        "django.server": {
+            "handlers": ["console"],
+            "level": LOG_LEVEL,
+            "propagate": False,
+        },
+    },
+}

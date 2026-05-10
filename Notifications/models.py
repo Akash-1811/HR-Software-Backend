@@ -22,7 +22,7 @@ class Notification(models.Model):
     """
     Centralized notification model.
     Uses GenericForeignKey so any app can attach a related object
-    (AttendanceRegularization, LeaveRequest, etc.) without schema changes.
+    (e.g. attendance regularizations) without schema changes.
     """
 
     recipient = models.ForeignKey(

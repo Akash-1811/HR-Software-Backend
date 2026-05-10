@@ -34,7 +34,11 @@ def user_can_manage_employee_regularization(user, employee) -> bool:
         return getattr(user, "office_id", None) == employee.office_id
 
     if user.role == UserRole.OFFICE_MANAGER:
-        return Office.objects.filter(pk=employee.office_id, managers=user).exists()
+        return Office.objects.filter(
+            pk=employee.office_id,
+            organization_id=employee.organization_id,
+            managers=user,
+        ).exists()
 
     return False
 
@@ -82,7 +86,10 @@ def regularizations_visible_to_user(user):
             qs = qs.filter(employee__office_id=user.office_id)
         return qs
     if user.role == UserRole.OFFICE_MANAGER:
-        return qs.filter(employee__office__managers=user)
+        qs = qs.filter(employee__office__managers=user)
+        if user.organization_id:
+            qs = qs.filter(employee__organization_id=user.organization_id)
+        return qs
     return qs.none()
 
 

@@ -318,9 +318,6 @@ class OfficeView(View):
                     designation=(admin_data.get("designation") or "").strip(),
                     role=UserRole.OFFICE_ADMIN,
                 )
-                admin_user.organization = org
-                admin_user.save(update_fields=["organization_id"])
-
                 office = Office(
                     organization=org,
                     name=name,
@@ -332,6 +329,9 @@ class OfficeView(View):
                 )
                 office.full_clean()
                 office.save()
+                admin_user.organization = org
+                admin_user.office = office
+                admin_user.save(update_fields=["organization_id", "office_id"])
                 office.managers.add(admin_user)
 
                 # Create an Employee record for the office admin (same person as User) and link it.
@@ -397,6 +397,7 @@ class OfficeView(View):
                     User.objects.filter(
                         pk__in=manager_ids,
                         organization_id=office.organization_id,
+                        role=UserRole.OFFICE_MANAGER,
                     ).values_list("pk", flat=True)
                 )
                 office.managers.set(valid)

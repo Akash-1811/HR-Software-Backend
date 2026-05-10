@@ -25,6 +25,22 @@ from Employee.models import Employee, Gender
 GENDER_VALID = set(Gender.values)
 
 
+def parse_bool(value: Any, default: bool = False) -> bool:
+    """Parse booleans from JSON/form/query values without treating every non-empty string as true."""
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return default
+    if isinstance(value, int):
+        return value != 0
+    normalized = str(value).strip().lower()
+    if normalized in {"true", "1", "yes", "y", "on"}:
+        return True
+    if normalized in {"false", "0", "no", "n", "off"}:
+        return False
+    return default
+
+
 def safe_int(value: Any, default: Optional[int] = None) -> Optional[int]:
     """Parse value to int; return default on failure. Handles str and int."""
     if value is None:
@@ -91,6 +107,30 @@ def apply_list_filters(queryset, user, query_params: dict):
 def office_belongs_to_organization(office, org_id: int) -> bool:
     """True if office exists and belongs to the given organization."""
     return office is not None and office.organization_id == org_id
+
+
+def employee_duplicate_conflict(
+    *,
+    organization_id: int,
+    emp_code: str = "",
+    email: str = "",
+    phone_number: str = "",
+    government_id_value: str = "",
+    exclude_employee_id: int | None = None,
+) -> str | None:
+    """Return a user-facing duplicate error for org-scoped employee identifiers."""
+    queryset = Employee.objects.filter(organization_id=organization_id)
+    if exclude_employee_id:
+        queryset = queryset.exclude(pk=exclude_employee_id)
+    if emp_code and queryset.filter(emp_code=emp_code).exists():
+        return "emp_code already exists for this organization"
+    if email and queryset.filter(email__iexact=email).exists():
+        return "email already exists for an employee in this organization"
+    if phone_number and queryset.filter(phone_number=phone_number).exists():
+        return "phone_number already exists for an employee in this organization"
+    if government_id_value and queryset.filter(government_id_value=government_id_value).exists():
+        return "government_id_value already exists for an employee in this organization"
+    return None
 
 
 def user_can_create_employees(user) -> bool:
@@ -194,7 +234,10 @@ def get_employees_queryset(user):
             office_id=user.office_id,
         ).select_related("organization", "office", "department", "shift")
     if user.role == UserRole.OFFICE_MANAGER:
-        return Employee.objects.filter(office__managers=user).select_related(
+        qs = Employee.objects.filter(office__managers=user)
+        if user.organization_id:
+            qs = qs.filter(organization_id=user.organization_id, office__organization_id=user.organization_id)
+        return qs.select_related(
             "organization", "office", "department", "shift"
         )
     return Employee.objects.none()

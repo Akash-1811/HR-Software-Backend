@@ -1,7 +1,6 @@
-# Attenova – Default DB from .env; Biometric (ESSL) fixed here
+# Attenova – runtime configuration comes from .env
 # Usage: docker compose up --build
-# Set in .env: default DB (ATTENOVA_DB_ENGINE, SQLITE_DB_NAME or DEFAULT_DB_*), APP_PORT, etc.
-# ESSL password: set ESSL_DB_PASSWORD in .env (used below)
+# Set default DB, optional ESSL integration, ports, and Gunicorn tuning in .env.
 
 services:
   web:
@@ -15,16 +14,17 @@ services:
       - .env
     environment:
       # Default DB: fully from .env (no overrides)
-      # Biometric (ESSL): fixed in compose; password from .env
-      ESSL_DB_NAME: yourdigitallift_biometric
-      ESSL_DB_USER: yourdigitallift_admin
-      ESSL_DB_PASSWORD: ${ESSL_DB_PASSWORD}
-      ESSL_DB_HOST: 68.178.167.233
-      ESSL_DB_PORT: "3306"
-      ESSL_DB_CONN_MAX_AGE: "30"
-      ESSL_DEVICE_LOGS_TABLE: DeviceLogs_2_2026
-      ESSL_SYNC_BATCH_SIZE: "5000"
-      ESSL_SYNC_MAX_BATCHES: "20"
+      # Biometric (ESSL): optional; leave blank to disable sync in local/dev.
+      ESSL_DB_NAME: ${ESSL_DB_NAME:-}
+      ESSL_DB_USER: ${ESSL_DB_USER:-}
+      ESSL_DB_PASSWORD: ${ESSL_DB_PASSWORD:-}
+      ESSL_DB_HOST: ${ESSL_DB_HOST:-}
+      ESSL_DB_PORT: ${ESSL_DB_PORT:-3306}
+      ESSL_DB_CONN_MAX_AGE: ${ESSL_DB_CONN_MAX_AGE:-30}
+      ESSL_DEVICE_LOGS_TABLE: ${ESSL_DEVICE_LOGS_TABLE:-DeviceLogs_2_2026}
+      ESSL_SYNC_BATCH_SIZE: ${ESSL_SYNC_BATCH_SIZE:-5000}
+      ESSL_SYNC_MAX_BATCHES: ${ESSL_SYNC_MAX_BATCHES:-20}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
       # Redis: in Docker always use the redis service (overrides .env)
       REDIS_URL: redis://redis:6379/0
       # Gunicorn tuning (override in .env if needed)

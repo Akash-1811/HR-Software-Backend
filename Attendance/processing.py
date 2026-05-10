@@ -8,13 +8,14 @@ Usage:
     stats = processor.process(from_date=..., to_date=...)
 """
 
+import logging
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from decimal import Decimal
-from typing import Iterator
+from typing import Any, Iterator
 
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.utils import timezone
 
 from Attendance.models import (
@@ -32,6 +33,11 @@ from Shifts.models import Shift
 DIR_IN = BIOMETRIC_DIRECTION_IN
 DIR_OUT = BIOMETRIC_DIRECTION_OUT
 
+logger = logging.getLogger(__name__)
+
+# Cache sentinel: same emp_code active in multiple organizations (global collision).
+_AMBIGUOUS_EMP_CODE = object()
+
 
 @dataclass
 class ProcessStats:
@@ -43,6 +49,7 @@ class ProcessStats:
     punches_synced: int = 0
     skipped_no_employee: int = 0
     skipped_no_punches: int = 0
+    skipped_ambiguous_emp_code: int = 0
 
     def __str__(self) -> str:
         return (
@@ -50,7 +57,8 @@ class ProcessStats:
             f"{self.created} created, {self.updated} updated, "
             f"{self.punches_synced} punches synced. "
             f"Skipped: {self.skipped_no_employee} (no employee), "
-            f"{self.skipped_no_punches} (no punches)."
+            f"{self.skipped_no_punches} (no punches), "
+            f"{self.skipped_ambiguous_emp_code} (ambiguous emp_code across tenants)."
         )
 
 
@@ -74,45 +82,62 @@ class BiometricAttendanceProcessor:
         qs = self._raw_queryset(from_date, to_date)
         grouped = self._group_by_employee_date(qs)
 
-        employee_cache: dict[str, Employee] = {}
+        employee_cache: dict[str, Any] = {}
 
-        with transaction.atomic():
-            for (emp_code, att_date), punches in grouped:
-                emp = self._resolve_employee(emp_code, employee_cache)
-                if not emp:
-                    stats.skipped_no_employee += 1
-                    continue
+        for (emp_code, att_date), punches in grouped:
+            emp = self._resolve_employee(emp_code, employee_cache)
+            if emp is _AMBIGUOUS_EMP_CODE:
+                stats.skipped_ambiguous_emp_code += 1
+                continue
+            if not emp:
+                stats.skipped_no_employee += 1
+                continue
 
-                in_punches = [p for p in punches if self._is_in(p)]
-                out_punches = [p for p in punches if self._is_out(p)]
-                if not in_punches or not out_punches:
-                    stats.skipped_no_punches += 1
-                    continue
+            in_punches = [p for p in punches if self._is_in(p)]
+            out_punches = [p for p in punches if self._is_out(p)]
+            if not in_punches or not out_punches:
+                stats.skipped_no_punches += 1
+                continue
 
-                first_in = min(p["log_date"] for p in in_punches)
-                last_out = max(p["log_date"] for p in out_punches)
-                working_hours = Decimal(str(round((last_out - first_in).total_seconds() / 3600, 2)))
+            first_in = min(p["log_date"] for p in in_punches)
+            last_out = max(p["log_date"] for p in out_punches)
+            working_hours = Decimal(str(round((last_out - first_in).total_seconds() / 3600, 2)))
 
-                shift = self._resolve_shift(emp)
-                late_minutes = self._compute_late_minutes(first_in, shift)
-                early_out_minutes = self._compute_early_out_minutes(last_out, shift)
-                status = AttendanceStatus.L if late_minutes > 0 else AttendanceStatus.P
+            shift = self._resolve_shift(emp)
+            late_minutes = self._compute_late_minutes(first_in, shift)
+            early_out_minutes = self._compute_early_out_minutes(last_out, shift)
+            status = AttendanceStatus.L if late_minutes > 0 else AttendanceStatus.P
 
-                attendance, created = Attendance.objects.get_or_create(
-                    employee=emp,
-                    date=att_date,
-                    defaults={
-                        "office": emp.office,
-                        "shift": shift,
-                        "first_in": first_in,
-                        "last_out": last_out,
-                        "working_hours": working_hours,
-                        "late_minutes": late_minutes,
-                        "early_out_minutes": early_out_minutes,
-                        "status": status,
-                        "source": AttendanceSource.BIOMETRIC,
-                    },
+            with transaction.atomic():
+                attendance = (
+                    Attendance.objects.select_for_update()
+                    .filter(employee=emp, date=att_date)
+                    .first()
                 )
+                if attendance is None:
+                    try:
+                        attendance = Attendance.objects.create(
+                            employee=emp,
+                            date=att_date,
+                            office=emp.office,
+                            shift=shift,
+                            first_in=first_in,
+                            last_out=last_out,
+                            working_hours=working_hours,
+                            late_minutes=late_minutes,
+                            early_out_minutes=early_out_minutes,
+                            status=status,
+                            source=AttendanceSource.BIOMETRIC,
+                        )
+                        created = True
+                    except IntegrityError:
+                        attendance = Attendance.objects.select_for_update().get(
+                            employee=emp,
+                            date=att_date,
+                        )
+                        created = False
+                else:
+                    created = False
 
                 if created:
                     stats.created += 1
@@ -130,8 +155,8 @@ class BiometricAttendanceProcessor:
                         )
 
                 synced = self._sync_punches(attendance, punches)
-                stats.punches_synced += synced
-                stats.processed += 1
+            stats.punches_synced += synced
+            stats.processed += 1
 
         return stats
 
@@ -166,17 +191,35 @@ class BiometricAttendanceProcessor:
         for key in sorted(groups.keys()):
             yield key, groups[key]
 
-    def _resolve_employee(self, emp_code: str, cache: dict) -> Employee | None:
+    def _resolve_employee(self, emp_code: str, cache: dict[str, Any]) -> Employee | None | object:
+        """
+        Match raw ``UserId`` to a single active Employee.
+
+        ``emp_code`` is only unique per organization. Raw vendor rows do not carry
+        tenant id, so if multiple active employees share the same code globally we
+        skip processing rather than attributing punches to an arbitrary tenant.
+        """
         if emp_code not in cache:
-            cache[emp_code] = (
-                Employee.objects.filter(
-                    emp_code=emp_code,
-                    is_active=True,
-                )
-                .select_related("office", "shift")
-                .first()
+            matches = list(
+                Employee.objects.filter(emp_code=emp_code, is_active=True).select_related(
+                    "office",
+                    "shift",
+                )[:2]
             )
-        return cache[emp_code]
+            if len(matches) == 0:
+                cache[emp_code] = None
+            elif len(matches) == 1:
+                cache[emp_code] = matches[0]
+            else:
+                logger.warning(
+                    "Biometric skip: emp_code matches multiple active employees (ambiguous tenant)",
+                    extra={"emp_code": emp_code},
+                )
+                cache[emp_code] = _AMBIGUOUS_EMP_CODE
+        resolved = cache[emp_code]
+        if resolved is _AMBIGUOUS_EMP_CODE:
+            return _AMBIGUOUS_EMP_CODE
+        return resolved
 
     def _resolve_shift(self, emp: Employee) -> Shift | None:
         if emp.shift_id:

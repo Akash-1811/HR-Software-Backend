@@ -1,3 +1,4 @@
+import logging
 import re
 
 from django.http import JsonResponse
@@ -11,6 +12,7 @@ from marketing.email_demo import send_book_demo_notification
 _EMAIL_PATTERN = re.compile(
     r"^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z]{2,}$",
 )
+logger = logging.getLogger(__name__)
 
 
 def _trim(s: str, max_len: int) -> str:
@@ -56,11 +58,13 @@ def book_demo(request):
     except ValueError as e:
         return JsonResponse({"error": str(e)}, status=503)
     except OSError:
+        logger.exception("Book demo notification failed")
         return JsonResponse(
             {"error": "Email could not be sent. Please try again later."},
             status=503,
         )
     except Exception:
+        logger.exception("Unexpected error while handling book demo request")
         return JsonResponse(
             {"error": "Something went wrong while sending your request."},
             status=503,

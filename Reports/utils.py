@@ -118,20 +118,23 @@ def build_hierarchical_rows(
     return rows
 
 
-def fetch_working_hours_for_pairs(date_emp_pairs):
+def fetch_working_hours_for_pairs(date_emp_pairs, employee_ids=None):
     """Fetch (emp_code, date) -> working_hours for the given (UserId, date) pairs."""
     if not date_emp_pairs:
         return {}
     q = Q()
     for emp_code, d in date_emp_pairs:
         q |= Q(employee__emp_code=emp_code, date=d)
-    atts = Attendance.objects.filter(q).values("employee__emp_code", "date", "working_hours")
+    atts = Attendance.objects.filter(q)
+    if employee_ids is not None:
+        atts = atts.filter(employee_id__in=employee_ids)
+    atts = atts.values("employee__emp_code", "date", "working_hours")
     return {
         (a["employee__emp_code"], a["date"]): float(a["working_hours"]) for a in atts if a["working_hours"] is not None
     }
 
 
-def fetch_regularized_clock_strings_for_pairs(date_emp_pairs):
+def fetch_regularized_clock_strings_for_pairs(date_emp_pairs, employee_ids=None):
     """
     For attendance rows flagged is_regularized, return clock strings from processed
     Attendance (effective first_in / last_out) so reports match Regularize + payroll.
@@ -141,7 +144,10 @@ def fetch_regularized_clock_strings_for_pairs(date_emp_pairs):
     q = Q()
     for emp_code, d in date_emp_pairs:
         q |= Q(employee__emp_code=emp_code, date=d, is_regularized=True)
-    rows = Attendance.objects.filter(q).values(
+    rows = Attendance.objects.filter(q)
+    if employee_ids is not None:
+        rows = rows.filter(employee_id__in=employee_ids)
+    rows = rows.values(
         "employee__emp_code",
         "date",
         "first_in",
@@ -204,8 +210,15 @@ def fetch_attendance_report_rows_for_office(office_id, report_date):
         key=lambda k: (emp_map.get(k[0]) or {}).get("name", ""),
     )
     date_emp_pairs = set(ordered_keys)
-    attendance_working_hours = fetch_working_hours_for_pairs(date_emp_pairs)
-    regularized_clocks = fetch_regularized_clock_strings_for_pairs(date_emp_pairs)
+    scoped_employee_ids = [e["id"] for e in emp_map.values()]
+    attendance_working_hours = fetch_working_hours_for_pairs(
+        date_emp_pairs,
+        employee_ids=scoped_employee_ids,
+    )
+    regularized_clocks = fetch_regularized_clock_strings_for_pairs(
+        date_emp_pairs,
+        employee_ids=scoped_employee_ids,
+    )
     full_rows = build_hierarchical_rows(
         emp_map,
         dict(groups),
@@ -273,8 +286,15 @@ def fetch_attendance_report_rows_for_organization(organization_id, report_date):
         key=lambda k: (emp_map.get(k[0]) or {}).get("name", ""),
     )
     date_emp_pairs = set(ordered_keys)
-    attendance_working_hours = fetch_working_hours_for_pairs(date_emp_pairs)
-    regularized_clocks = fetch_regularized_clock_strings_for_pairs(date_emp_pairs)
+    scoped_employee_ids = [e["id"] for e in emp_map.values()]
+    attendance_working_hours = fetch_working_hours_for_pairs(
+        date_emp_pairs,
+        employee_ids=scoped_employee_ids,
+    )
+    regularized_clocks = fetch_regularized_clock_strings_for_pairs(
+        date_emp_pairs,
+        employee_ids=scoped_employee_ids,
+    )
     full_rows = build_hierarchical_rows(
         emp_map,
         dict(groups),

@@ -87,9 +87,9 @@ class AttendanceReport(View):
         sort = (request.GET.get("sort") or "date_desc").strip().lower()
         sort_desc = sort != "date_asc"
 
-        emp_map = {
-            e["emp_code"]: e for e in employees_qs.filter(emp_code__in=emp_codes).values("id", "emp_code", "name")
-        }
+        emp_rows = list(employees_qs.filter(emp_code__in=emp_codes).values("id", "emp_code", "name"))
+        emp_map = {e["emp_code"]: e for e in emp_rows}
+        scoped_employee_ids = [e["id"] for e in emp_rows]
 
         qs = DummyEsslBiometricAttendanceData.objects.filter(
             UserId__in=emp_codes,
@@ -97,8 +97,10 @@ class AttendanceReport(View):
             LogDate__date__gte=start_date,
             LogDate__date__lte=end_date,
         )
-        if direction_filter:
-            qs = qs.filter(Direction__iexact=direction_filter)
+        if direction_filter == "in":
+            qs = qs.filter(Q(Direction__iexact="in") | Q(Direction="1"))
+        elif direction_filter == "out":
+            qs = qs.filter(Q(Direction__iexact="out") | Q(Direction="0"))
 
         raw = list(qs.order_by("-LogDate", "UserId").values("UserId", "DeviceId", "LogDate", "Direction"))
 
@@ -122,8 +124,8 @@ class AttendanceReport(View):
         total = len(sorted_keys)
         page_keys = sorted_keys[offset : offset + page_size]
         date_emp_pairs = set(page_keys)
-        attendance_working_hours = fetch_working_hours_for_pairs(date_emp_pairs)
-        regularized_clocks = fetch_regularized_clock_strings_for_pairs(date_emp_pairs)
+        attendance_working_hours = fetch_working_hours_for_pairs(date_emp_pairs, employee_ids=scoped_employee_ids)
+        regularized_clocks = fetch_regularized_clock_strings_for_pairs(date_emp_pairs, employee_ids=scoped_employee_ids)
 
         page_groups = {k: groups[k] for k in page_keys}
         rows = build_hierarchical_rows(

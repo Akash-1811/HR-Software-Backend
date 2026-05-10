@@ -50,10 +50,12 @@ def get_offices_queryset(user):
             qs = qs.filter(organization_id=user.organization_id)
         return qs
     if user.organization_id:
-        if getattr(user, "office_id", None) and user.role in (
+        if user.role in (
             UserRole.OFFICE_ADMIN,
             UserRole.SUPERVISOR,
         ):
+            if not getattr(user, "office_id", None):
+                return base.none()
             return base.filter(pk=user.office_id, organization_id=user.organization_id)
         return base.filter(organization_id=user.organization_id)
     return base.none()

@@ -15,7 +15,7 @@ Schedule via cron, e.g. daily at 2 AM:
 
 from datetime import datetime
 
-from django.core.management.base import BaseCommand
+from django.core.management.base import BaseCommand, CommandError
 
 from Attendance.processing import BiometricAttendanceProcessor
 
@@ -59,5 +59,4 @@ class Command(BaseCommand):
         try:
             return datetime.strptime(value, "%Y-%m-%d").date()
         except ValueError:
-            self.stderr.write(self.style.ERROR(f"Invalid date format: {value}. Use YYYY-MM-DD."))
-            return None
+            raise CommandError(f"Invalid date format: {value}. Use YYYY-MM-DD.") from None

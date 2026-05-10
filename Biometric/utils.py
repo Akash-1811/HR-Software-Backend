@@ -2,11 +2,16 @@
 Helper functions for the Biometric app.
 """
 
+import re
+
 from django.conf import settings
 
 from Organization.access import get_offices_queryset
 
 from Biometric.models import BiometricDevice
+
+
+SQL_IDENTIFIER_RE = re.compile(r"^[A-Za-z0-9_]+$")
 
 
 def device_payload(device):
@@ -45,6 +50,14 @@ def get_essl_conn_params():
         "database": db.get("NAME", ""),
         "charset": "utf8mb4",
     }
+
+
+def get_essl_logs_table() -> str:
+    """Return the configured ESSL DeviceLogs table after validating it as a SQL identifier."""
+    table = getattr(settings, "ESSL_DEVICE_LOGS_TABLE", "DeviceLogs_2_2026")
+    if not SQL_IDENTIFIER_RE.match(table):
+        raise ValueError("Invalid ESSL_DEVICE_LOGS_TABLE")
+    return table
 
 
 def format_time_for_essl(val):

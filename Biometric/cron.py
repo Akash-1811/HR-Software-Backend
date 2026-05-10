@@ -18,7 +18,7 @@ from django.utils import timezone
 
 from Attendance.processing import BiometricAttendanceProcessor
 from Biometric.models import DummyEsslBiometricAttendanceData
-from Biometric.utils import get_essl_conn_params
+from Biometric.utils import get_essl_conn_params, get_essl_logs_table
 
 logger = logging.getLogger(__name__)
 
@@ -61,7 +61,11 @@ def sync_essl_device_logs_to_dummy() -> int:
         logger.debug("essl_db not configured; skipping ESSL pull.")
         return 0
 
-    table = getattr(settings, "ESSL_DEVICE_LOGS_TABLE", "DeviceLogs_2_2026")
+    try:
+        table = get_essl_logs_table()
+    except ValueError:
+        logger.exception("Invalid ESSL_DEVICE_LOGS_TABLE configured; skipping ESSL pull.")
+        return 0
     batch_size = getattr(settings, "ESSL_SYNC_BATCH_SIZE", 5000)
     max_batches = getattr(settings, "ESSL_SYNC_MAX_BATCHES", 20)
 

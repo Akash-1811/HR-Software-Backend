@@ -30,11 +30,13 @@ from Employee.utils import (
     allowed_designations_for_user,
     apply_list_filters,
     employee_payload,
+    employee_duplicate_conflict,
     get_employees_queryset,
     is_superadmin,
     normalize_df_columns,
     normalize_gender,
     office_belongs_to_organization,
+    parse_bool,
     parse_date_request,
     safe_int,
     user_can_assign_designation,
@@ -123,20 +125,15 @@ def create_employee_with_login(request):
 
     if User.objects.filter(email__iexact=email).exists():
         return JsonResponse({"error": "A user with this email already exists"}, status=400)
-    if Employee.objects.filter(organization_id=org_id, emp_code=emp_code).exists():
-        return JsonResponse({"error": "emp_code already exists for this organization"}, status=400)
-    if email and Employee.objects.filter(organization_id=org_id, email__iexact=email).exists():
-        return JsonResponse({"error": "email already exists for an employee in this organization"}, status=400)
-    if phone_number and Employee.objects.filter(organization_id=org_id, phone_number=phone_number).exists():
-        return JsonResponse({"error": "phone_number already exists for an employee in this organization"}, status=400)
-    if (
-        government_id_value
-        and Employee.objects.filter(organization_id=org_id, government_id_value=government_id_value).exists()
-    ):
-        return JsonResponse(
-            {"error": "government_id_value already exists for an employee in this organization"},
-            status=400,
-        )
+    duplicate_error = employee_duplicate_conflict(
+        organization_id=org_id,
+        emp_code=emp_code,
+        email=email,
+        phone_number=phone_number,
+        government_id_value=government_id_value,
+    )
+    if duplicate_error:
+        return JsonResponse({"error": duplicate_error}, status=400)
 
     if date_of_birth is not None:
         age = age_years(date_of_birth)
@@ -169,7 +166,9 @@ def create_employee_with_login(request):
                 role=user_role,
             )
             new_user.organization = office.organization
-            new_user.save(update_fields=["organization_id"])
+            if user_role == UserRole.SUPERVISOR:
+                new_user.office = office
+            new_user.save(update_fields=["organization_id", "office_id"])
 
             emp = Employee.objects.create(
                 organization_id=org_id,
@@ -304,8 +303,15 @@ class EmployeeView(View):
         if not designation:
             designation = "EMPLOYEE"
 
-        if Employee.objects.filter(organization_id=org_id, emp_code=emp_code).exists():
-            return JsonResponse({"error": "emp_code already exists for this organization"}, status=400)
+        duplicate_error = employee_duplicate_conflict(
+            organization_id=org_id,
+            emp_code=emp_code,
+            email=email,
+            phone_number=phone_number,
+            government_id_value=government_id_value,
+        )
+        if duplicate_error:
+            return JsonResponse({"error": duplicate_error}, status=400)
 
         shift_id = safe_int(body.get("shift_id"))
         shift = None
@@ -347,7 +353,7 @@ class EmployeeView(View):
 
     def _update(self, request, pk):
         user = request.user
-        emp = Employee.objects.filter(pk=pk).select_related("shift", "department").first()
+        emp = Employee.objects.filter(pk=pk).select_related("shift", "department", "user").first()
         if not emp:
             return JsonResponse({"error": "Not found"}, status=404)
         if not user_can_access_employee(user, emp):
@@ -378,14 +384,10 @@ class EmployeeView(View):
             update_fields.add("date_of_birth")
         if "emp_code" in body:
             ec = (body.get("emp_code") or "").strip()
-            if (
-                ec
-                and not Employee.objects.filter(organization_id=emp.organization_id, emp_code=ec)
-                .exclude(pk=emp.pk)
-                .exists()
-            ):
-                emp.emp_code = ec
-                update_fields.add("emp_code")
+            if not ec:
+                return JsonResponse({"error": "emp_code cannot be empty"}, status=400)
+            emp.emp_code = ec
+            update_fields.add("emp_code")
         if "shift_id" in body:
             shift_id = safe_int(body.get("shift_id"))
             if shift_id:
@@ -427,7 +429,7 @@ class EmployeeView(View):
             emp.department = None
             update_fields.add("department")
         if "is_active" in body:
-            emp.is_active = bool(body["is_active"])
+            emp.is_active = parse_bool(body.get("is_active"), default=emp.is_active)
             update_fields.add("is_active")
         if "government_id_type" in body:
             emp.government_id_type = (body.get("government_id_type") or "").strip()
@@ -435,6 +437,16 @@ class EmployeeView(View):
         if "government_id_value" in body:
             emp.government_id_value = (body.get("government_id_value") or "").strip()
             update_fields.add("government_id_value")
+        duplicate_error = employee_duplicate_conflict(
+            organization_id=emp.organization_id,
+            emp_code=emp.emp_code,
+            email=emp.email,
+            phone_number=emp.phone_number,
+            government_id_value=emp.government_id_value,
+            exclude_employee_id=emp.pk,
+        )
+        if duplicate_error:
+            return JsonResponse({"error": duplicate_error}, status=409)
         profile_pic = files.get("profile_pic") if files else None
         if profile_pic:
             emp.profile_pic = profile_pic
@@ -443,19 +455,33 @@ class EmployeeView(View):
         update_fields.update(("updated_at", "updated_by"))
         try:
             emp.full_clean()
-            emp.save(update_fields=list(update_fields))
+            with transaction.atomic():
+                emp.save(update_fields=list(update_fields))
+                if emp.user_id and not emp.is_active:
+                    emp.user.is_active = False
+                    emp.user.save(update_fields=["is_active"])
         except ValidationError as e:
             return JsonResponse({"error": str(e)}, status=400)
+        except IntegrityError:
+            return JsonResponse({"error": "Employee update conflicts with an existing record"}, status=409)
         return JsonResponse(employee_payload(emp), status=200)
 
     def _delete(self, request, pk):
-        emp = Employee.objects.filter(pk=pk).first()
+        emp = Employee.objects.filter(pk=pk).select_related("user").first()
         if not emp:
             return JsonResponse({"error": "Not found"}, status=404)
         if not user_can_access_employee(request.user, emp):
             return JsonResponse({"error": "Not found"}, status=404)
-        emp.delete()
-        return JsonResponse({"message": "Deleted"}, status=200)
+        if not emp.is_active:
+            return JsonResponse({"message": "Employee already inactive"}, status=200)
+        emp.is_active = False
+        emp.updated_by = request.user
+        with transaction.atomic():
+            emp.save(update_fields=["is_active", "updated_at", "updated_by"])
+            if emp.user_id:
+                emp.user.is_active = False
+                emp.user.save(update_fields=["is_active"])
+        return JsonResponse({"message": "Deactivated"}, status=200)
 
 
 @require_auth
@@ -482,9 +508,7 @@ def check_employee_duplicate(request):
     government_id_value = (request.GET.get("government_id_value") or "").strip()
     exclude_id = safe_int(request.GET.get("exclude_employee_id"))
 
-    # Single query with conditional aggregation (one round-trip, index-friendly).
-    # Same pattern as large platforms: minimize round-trips, set-based check, no N+1.
-    base = Employee.objects.filter(office_id=office_id, is_active=True)
+    base = Employee.objects.filter(organization_id=office.organization_id)
     if exclude_id:
         base = base.exclude(pk=exclude_id)
 
@@ -500,7 +524,7 @@ def check_employee_duplicate(request):
     if email:
         agg_kwargs["email_taken"] = Max(
             Case(
-                When(email=email, then=Value(1)),
+                When(email__iexact=email, then=Value(1)),
                 default=Value(0),
                 output_field=IntegerField(),
             )

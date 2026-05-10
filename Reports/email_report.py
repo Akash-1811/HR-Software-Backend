@@ -4,6 +4,7 @@ Used by the management command and the API view.
 """
 
 import io
+import logging
 from datetime import date
 from pathlib import Path
 
@@ -17,6 +18,8 @@ from Reports.utils import (
     fetch_attendance_report_rows_for_office,
     get_recipients_for_office,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def build_excel_bytes(rows, office_name, report_date_str):
@@ -126,8 +129,12 @@ def send_report_email(
     if to_emails_override:
         to_emails = list(dict.fromkeys(e for e in to_emails_override if e))
     else:
-        to_emails = list({u.email for u in recipients if u.email} | {"akashyadav181198@gmail.com"})
+        to_emails = list(dict.fromkeys(u.email for u in recipients if u.email))
     if not to_emails:
+        logger.info(
+            "Skipping daily attendance email: no recipients configured",
+            extra={"office_id": office.id, "report_date": report_date.isoformat()},
+        )
         return
 
     if dry_run:

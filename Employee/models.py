@@ -126,3 +126,85 @@ class Employee(models.Model):
             raise ValidationError({"shift": "Shift must belong to the same office as the employee."})
         if self.department_id and self.office_id and self.department.office_id != self.office_id:
             raise ValidationError({"department": "Department must belong to the same office as the employee."})
+
+
+class MaritalStatus(models.TextChoices):
+    SINGLE = "SINGLE", "Single"
+    MARRIED = "MARRIED", "Married"
+    DIVORCED = "DIVORCED", "Divorced"
+    WIDOWED = "WIDOWED", "Widowed"
+    OTHER = "OTHER", "Other"
+
+
+class EmploymentType(models.TextChoices):
+    FULL_TIME = "FULL_TIME", "Full-time"
+    PART_TIME = "PART_TIME", "Part-time"
+    CONTRACT = "CONTRACT", "Contract"
+    INTERN = "INTERN", "Intern"
+    OTHER = "OTHER", "Other"
+
+
+class EmployeeProfile(models.Model):
+    """Extended HR-style profile linked one-to-one to Employee (self-service + directory)."""
+
+    employee = models.OneToOneField(
+        Employee,
+        on_delete=models.CASCADE,
+        related_name="extended_profile",
+    )
+    marital_status = models.CharField(max_length=16, choices=MaritalStatus.choices, blank=True)
+    blood_group = models.CharField(max_length=16, blank=True)
+    nationality = models.CharField(max_length=100, blank=True)
+    alternate_phone = models.CharField(max_length=20, blank=True)
+    emergency_contact_name = models.CharField(max_length=255, blank=True)
+    emergency_contact_phone = models.CharField(max_length=20, blank=True)
+    emergency_contact_relation = models.CharField(max_length=64, blank=True)
+    current_address = models.TextField(blank=True)
+    permanent_address = models.TextField(blank=True)
+    city = models.CharField(max_length=100, blank=True)
+    state = models.CharField(max_length=100, blank=True)
+    country = models.CharField(max_length=100, blank=True)
+    postal_code = models.CharField(max_length=20, blank=True)
+    joining_date = models.DateField(null=True, blank=True)
+    employment_type = models.CharField(max_length=16, choices=EmploymentType.choices, blank=True)
+    work_location = models.CharField(
+        max_length=255,
+        blank=True,
+        help_text="Optional display label; canonical site is office.",
+    )
+    employment_status_note = models.CharField(
+        max_length=64,
+        blank=True,
+        help_text="e.g. ON_LEAVE — informational; does not replace is_active.",
+    )
+    education_entries = models.JSONField(blank=True, default=list)
+    certifications = models.TextField(blank=True)
+    skills = models.TextField(blank=True)
+    linkedin_url = models.URLField(blank=True)
+    github_url = models.URLField(blank=True)
+    portfolio_url = models.URLField(blank=True)
+    twitter_url = models.URLField(blank=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    reporting_manager = models.ForeignKey(
+        Employee,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="profile_managed_employees",
+        help_text="HR-assigned reporting line (read-only for employee self-service API).",
+    )
+    updated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="+",
+    )
+
+    class Meta:
+        db_table = "employee_profile"
+        verbose_name = "Employee profile"
+        verbose_name_plural = "Employee profiles"
+
+    def __str__(self):
+        return f"Profile · {self.employee.name}"

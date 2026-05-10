@@ -1,55 +1,22 @@
-from datetime import datetime
-
 from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.http import JsonResponse
+from django.utils.decorators import method_decorator
 from django.views import View
 from django.views.decorators.csrf import csrf_exempt
-from django.utils.decorators import method_decorator
 
 from Attenova.api_utils import parse_json_request
-from Organization.access import get_offices_queryset, user_can_access_office
+from Organization.access import user_can_access_office
 from Shifts.models import Shift
+from Shifts.utils import (
+    apply_shift_patch,
+    get_accessible_shifts_queryset,
+    parse_min_working_hours,
+    parse_shift_time,
+    parse_weekoff_days,
+    serialize_shift,
+)
 from Users.auth_utils import require_auth
-
-
-def _shift_payload(shift):
-    """Build API payload for a Shift."""
-    return {
-        "id": shift.id,
-        "office_id": shift.office_id,
-        "name": shift.name,
-        "start_time": shift.start_time.strftime("%H:%M") if shift.start_time else None,
-        "end_time": shift.end_time.strftime("%H:%M") if shift.end_time else None,
-        "grace_minutes": shift.grace_minutes,
-        "is_night_shift": shift.is_night_shift,
-        "is_active": shift.is_active,
-        "is_default": shift.is_default,
-        "created_at": shift.created_at.isoformat() if shift.created_at else None,
-    }
-
-
-def _get_shifts_queryset(user):
-    """Shifts the user can access (via offices they can access)."""
-    offices = get_offices_queryset(user)
-    return Shift.objects.filter(office__in=offices).select_related("office")
-
-
-def _parse_time(value):
-    """Parse 'HH:MM' or 'HH:MM:SS' string to time. Returns None on failure."""
-    if value is None:
-        return None
-    if hasattr(value, "hour"):  # already a time
-        return value
-    s = (value or "").strip()
-    if not s:
-        return None
-    for fmt in ("%H:%M", "%H:%M:%S"):
-        try:
-            return datetime.strptime(s, fmt).time()
-        except (ValueError, TypeError):
-            continue
-    return None
 
 
 @method_decorator(csrf_exempt, name="dispatch")
@@ -82,15 +49,15 @@ class ShiftView(View):
 
     def _list(self, request):
         user = request.user
-        shifts = _get_shifts_queryset(user).order_by("office", "name")
+        shifts = get_accessible_shifts_queryset(user).order_by("office", "name")
         office_id = request.GET.get("office_id")
         if office_id:
             try:
-                office_id = int(office_id)
-                shifts = shifts.filter(office_id=office_id)
+                oid = int(office_id)
+                shifts = shifts.filter(office_id=oid)
             except (TypeError, ValueError):
                 pass
-        return JsonResponse({"shifts": [_shift_payload(s) for s in shifts]}, status=200)
+        return JsonResponse({"shifts": [serialize_shift(s) for s in shifts]}, status=200)
 
     def _detail(self, request, pk):
         shift = Shift.objects.filter(pk=pk).select_related("office").first()
@@ -98,7 +65,7 @@ class ShiftView(View):
             return JsonResponse({"error": "Not found"}, status=404)
         if not user_can_access_office(request.user, shift.office):
             return JsonResponse({"error": "Not found"}, status=404)
-        return JsonResponse(_shift_payload(shift), status=200)
+        return JsonResponse(serialize_shift(shift), status=200)
 
     def _create(self, request):
         user = request.user
@@ -108,12 +75,8 @@ class ShiftView(View):
 
         office_id = body.get("office_id")
         name = (body.get("name") or "").strip()
-        start_time = _parse_time(body.get("start_time"))
-        end_time = _parse_time(body.get("end_time"))
-        grace_minutes = max(0, int(body.get("grace_minutes") or 0))
-        is_night_shift = bool(body.get("is_night_shift", False))
-        is_active = bool(body.get("is_active", True))
-        is_default = bool(body.get("is_default", False))
+        start_time = parse_shift_time(body.get("start_time"))
+        end_time = parse_shift_time(body.get("end_time"))
 
         if not office_id:
             return JsonResponse({"error": "office_id is required"}, status=400)
@@ -136,6 +99,17 @@ class ShiftView(View):
         if not user_can_access_office(user, office):
             return JsonResponse({"error": "Not found"}, status=404)
 
+        grace_minutes = max(0, int(body.get("grace_minutes") or 0))
+        weekoff_days = parse_weekoff_days(body.get("weekoff_days"))
+        min_working_hours = parse_min_working_hours(body.get("min_working_hours"))
+        lunch_break_minutes = max(0, int(body.get("lunch_break_minutes") or 0))
+        tea_break_minutes = max(0, int(body.get("tea_break_minutes") or 0))
+        lunch_break_paid = bool(body.get("lunch_break_paid", True))
+        tea_breaks_paid = bool(body.get("tea_breaks_paid", True))
+        is_night_shift = bool(body.get("is_night_shift", False))
+        is_active = bool(body.get("is_active", True))
+        is_default = bool(body.get("is_default", False))
+
         with transaction.atomic():
             if is_default:
                 Shift.objects.filter(office_id=office_id).update(is_default=False)
@@ -146,6 +120,12 @@ class ShiftView(View):
                     start_time=start_time,
                     end_time=end_time,
                     grace_minutes=grace_minutes,
+                    weekoff_days=weekoff_days,
+                    min_working_hours=min_working_hours,
+                    lunch_break_minutes=lunch_break_minutes,
+                    tea_break_minutes=tea_break_minutes,
+                    lunch_break_paid=lunch_break_paid,
+                    tea_breaks_paid=tea_breaks_paid,
                     is_night_shift=is_night_shift,
                     is_active=is_active,
                     is_default=is_default,
@@ -156,7 +136,7 @@ class ShiftView(View):
                 shift.save()
             except ValidationError as e:
                 return JsonResponse({"error": str(e)}, status=400)
-        return JsonResponse(_shift_payload(shift), status=201)
+        return JsonResponse(serialize_shift(shift), status=201)
 
     def _update(self, request, pk):
         user = request.user
@@ -170,34 +150,9 @@ class ShiftView(View):
         if err:
             return err
 
-        update_fields = []
-        if "name" in body:
-            v = (body.get("name") or "").strip()
-            if v:
-                shift.name = v
-                update_fields.append("name")
-        if "start_time" in body:
-            t = _parse_time(body.get("start_time"))
-            if t is not None:
-                shift.start_time = t
-                update_fields.append("start_time")
-        if "end_time" in body:
-            t = _parse_time(body.get("end_time"))
-            if t is not None:
-                shift.end_time = t
-                update_fields.append("end_time")
-        if "grace_minutes" in body:
-            shift.grace_minutes = max(0, int(body.get("grace_minutes") or 0))
-            update_fields.append("grace_minutes")
-        if "is_night_shift" in body:
-            shift.is_night_shift = bool(body["is_night_shift"])
-            update_fields.append("is_night_shift")
-        if "is_active" in body:
-            shift.is_active = bool(body["is_active"])
-            update_fields.append("is_active")
-        if "is_default" in body:
-            shift.is_default = bool(body["is_default"])
-            update_fields.append("is_default")
+        update_fields, patch_error = apply_shift_patch(shift, body)
+        if patch_error:
+            return patch_error
 
         shift.updated_by = user
         update_fields.extend(["updated_at", "updated_by"])
@@ -209,7 +164,7 @@ class ShiftView(View):
                 shift.save(update_fields=update_fields)
             except ValidationError as e:
                 return JsonResponse({"error": str(e)}, status=400)
-        return JsonResponse(_shift_payload(shift), status=200)
+        return JsonResponse(serialize_shift(shift), status=200)
 
     def _delete(self, request, pk):
         user = request.user

@@ -1,5 +1,6 @@
 from datetime import datetime
 
+from django.db import transaction
 from django.http import JsonResponse
 from django.utils import timezone
 from django.utils.decorators import method_decorator
@@ -96,6 +97,10 @@ class RegularizationView(View):
         if att_date is None:
             return JsonResponse({"error": "Invalid date format (expected YYYY-MM-DD)"}, status=400)
 
+        today = timezone.now().date()
+        if att_date > today:
+            return JsonResponse({"error": "Cannot regularize a future date"}, status=400)
+
         try:
             attendance = Attendance.objects.get(employee=employee, date=att_date)
         except Attendance.DoesNotExist:
@@ -104,42 +109,44 @@ class RegularizationView(View):
                 status=404,
             )
 
-        pending_exists = AttendanceRegularization.objects.filter(
-            attendance=attendance,
-            status=RegularizationStatus.PENDING,
-        ).exists()
-        if pending_exists:
-            return JsonResponse(
-                {"error": "A pending regularization already exists for this attendance record"},
-                status=409,
-            )
-
         new_first_in = _parse_datetime(body.get("new_first_in"))
         new_last_out = _parse_datetime(body.get("new_last_out"))
 
         auto = is_auto_approved(request.user)
         reg_status = RegularizationStatus.APPROVED if auto else RegularizationStatus.PENDING
 
-        reg = AttendanceRegularization.objects.create(
-            attendance=attendance,
-            employee=employee,
-            date=att_date,
-            previous_first_in=attendance.first_in,
-            previous_last_out=attendance.last_out,
-            previous_status=attendance.status,
-            new_status=new_status,
-            new_first_in=new_first_in,
-            new_last_out=new_last_out,
-            reason=reason,
-            status=reg_status,
-            requested_by=request.user,
-            reviewed_by=request.user if auto else None,
-            reviewed_at=timezone.now() if auto else None,
-        )
+        with transaction.atomic():
+            attendance = Attendance.objects.select_for_update().get(pk=attendance.pk)
+            if AttendanceRegularization.objects.filter(
+                attendance=attendance,
+                status=RegularizationStatus.PENDING,
+            ).exists():
+                return JsonResponse(
+                    {"error": "A pending regularization already exists for this attendance record"},
+                    status=409,
+                )
 
-        if auto:
-            apply_regularization(reg)
-        else:
+            reg = AttendanceRegularization.objects.create(
+                attendance=attendance,
+                employee=employee,
+                date=att_date,
+                previous_first_in=attendance.first_in,
+                previous_last_out=attendance.last_out,
+                previous_status=attendance.status,
+                new_status=new_status,
+                new_first_in=new_first_in,
+                new_last_out=new_last_out,
+                reason=reason,
+                status=reg_status,
+                requested_by=request.user,
+                reviewed_by=request.user if auto else None,
+                reviewed_at=timezone.now() if auto else None,
+            )
+
+            if auto:
+                apply_regularization(reg)
+
+        if not auto:
             approvers = get_approvers_for_employee(employee)
             create_bulk_notifications(
                 recipients=approvers,
@@ -172,7 +179,10 @@ class RegularizationView(View):
         # list with optional filters
         emp_id = request.GET.get("employee_id")
         if emp_id:
-            qs = qs.filter(employee_id=emp_id)
+            try:
+                qs = qs.filter(employee_id=int(emp_id))
+            except (TypeError, ValueError):
+                return JsonResponse({"error": "Invalid employee_id"}, status=400)
 
         # Only Org Admin can filter by office_id; Manager/Office Admin/Supervisor see only their office(s)
         office_id = request.GET.get("office_id")
@@ -188,17 +198,24 @@ class RegularizationView(View):
 
         date_from = request.GET.get("date_from")
         if date_from:
-            qs = qs.filter(date__gte=date_from)
+            parsed = parse_iso_date(date_from)
+            if parsed is None:
+                return JsonResponse({"error": "Invalid date_from"}, status=400)
+            qs = qs.filter(date__gte=parsed)
 
         date_to = request.GET.get("date_to")
         if date_to:
-            qs = qs.filter(date__lte=date_to)
+            parsed = parse_iso_date(date_to)
+            if parsed is None:
+                return JsonResponse({"error": "Invalid date_to"}, status=400)
+            qs = qs.filter(date__lte=parsed)
 
         date_exact = (request.GET.get("date") or "").strip()
         if date_exact:
             d_exact = parse_iso_date(date_exact)
-            if d_exact is not None:
-                qs = qs.filter(date=d_exact)
+            if d_exact is None:
+                return JsonResponse({"error": "Invalid date"}, status=400)
+            qs = qs.filter(date=d_exact)
 
         page, page_size, start = pagination_params(request.GET)
 
@@ -220,32 +237,32 @@ class RegularizationView(View):
 @require_http_methods(["POST"])
 def approve_regularization(request, pk):
     """POST /api/attendance/regularizations/<pk>/approve/"""
-    qs = _get_regularization_queryset(request.user)
-    try:
-        reg = qs.get(pk=pk)
-    except AttendanceRegularization.DoesNotExist:
-        return JsonResponse({"error": "Regularization not found"}, status=404)
-
-    if reg.status != RegularizationStatus.PENDING:
-        return JsonResponse(
-            {"error": f"Cannot approve – current status is {reg.status}"},
-            status=400,
-        )
-
-    if not can_review_regularization(request.user, reg):
-        return JsonResponse({"error": "Not authorized to approve"}, status=403)
-
     body, err = parse_json_request(request)
     if err:
         return err
 
-    reg.status = RegularizationStatus.APPROVED
-    reg.reviewed_by = request.user
-    reg.reviewed_at = timezone.now()
-    reg.review_remarks = body.get("remarks", "")
-    reg.save()
+    qs = _get_regularization_queryset(request.user)
+    with transaction.atomic():
+        try:
+            reg = qs.select_for_update().get(pk=pk)
+        except AttendanceRegularization.DoesNotExist:
+            return JsonResponse({"error": "Regularization not found"}, status=404)
 
-    apply_regularization(reg)
+        if reg.status != RegularizationStatus.PENDING:
+            return JsonResponse(
+                {"error": f"Cannot approve – current status is {reg.status}"},
+                status=400,
+            )
+
+        if not can_review_regularization(request.user, reg):
+            return JsonResponse({"error": "Not authorized to approve"}, status=403)
+
+        reg.status = RegularizationStatus.APPROVED
+        reg.reviewed_by = request.user
+        reg.reviewed_at = timezone.now()
+        reg.review_remarks = body.get("remarks", "")
+        reg.save()
+        apply_regularization(reg)
 
     create_notification(
         recipient=reg.requested_by,
@@ -268,21 +285,6 @@ def approve_regularization(request, pk):
 @require_http_methods(["POST"])
 def reject_regularization(request, pk):
     """POST /api/attendance/regularizations/<pk>/reject/"""
-    qs = _get_regularization_queryset(request.user)
-    try:
-        reg = qs.get(pk=pk)
-    except AttendanceRegularization.DoesNotExist:
-        return JsonResponse({"error": "Regularization not found"}, status=404)
-
-    if reg.status != RegularizationStatus.PENDING:
-        return JsonResponse(
-            {"error": f"Cannot reject – current status is {reg.status}"},
-            status=400,
-        )
-
-    if not can_review_regularization(request.user, reg):
-        return JsonResponse({"error": "Not authorized to reject"}, status=403)
-
     body, err = parse_json_request(request)
     if err:
         return err
@@ -294,11 +296,27 @@ def reject_regularization(request, pk):
             status=400,
         )
 
-    reg.status = RegularizationStatus.REJECTED
-    reg.reviewed_by = request.user
-    reg.reviewed_at = timezone.now()
-    reg.review_remarks = remarks
-    reg.save()
+    qs = _get_regularization_queryset(request.user)
+    with transaction.atomic():
+        try:
+            reg = qs.select_for_update().get(pk=pk)
+        except AttendanceRegularization.DoesNotExist:
+            return JsonResponse({"error": "Regularization not found"}, status=404)
+
+        if reg.status != RegularizationStatus.PENDING:
+            return JsonResponse(
+                {"error": f"Cannot reject – current status is {reg.status}"},
+                status=400,
+            )
+
+        if not can_review_regularization(request.user, reg):
+            return JsonResponse({"error": "Not authorized to reject"}, status=403)
+
+        reg.status = RegularizationStatus.REJECTED
+        reg.reviewed_by = request.user
+        reg.reviewed_at = timezone.now()
+        reg.review_remarks = remarks
+        reg.save()
 
     create_notification(
         recipient=reg.requested_by,

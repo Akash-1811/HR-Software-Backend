@@ -55,6 +55,7 @@ jobs:
           SECRET_KEY: ci-dummy-secret-key-min-50-chars-long-for-django
           ATTENOVA_DB_ENGINE: sqlite3
           DEBUG: "false"
+          ALLOWED_HOSTS: localhost,127.0.0.1
         run: python manage.py check
 
       - name: Run Django tests
@@ -62,6 +63,7 @@ jobs:
           SECRET_KEY: ci-dummy-secret-key-min-50-chars-long-for-django
           ATTENOVA_DB_ENGINE: sqlite3
           DEBUG: "false"
+          ALLOWED_HOSTS: localhost,127.0.0.1
         run: python manage.py test --no-input
 
   build:
