@@ -7,7 +7,9 @@ import uuid
 from typing import Any
 
 
-def parse_chat_payload(body: dict[str, Any], *, max_message_chars: int) -> tuple[str | None, dict[str, Any] | None, str | None]:
+def parse_chat_payload(
+    body: dict[str, Any], *, max_message_chars: int
+) -> tuple[str | None, dict[str, Any] | None, str | None]:
     """
     Returns (conversation_id_str_or_none, client_context_dict, error_message).
     conversation_id None → server creates a conversation.

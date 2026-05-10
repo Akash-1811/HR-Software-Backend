@@ -33,7 +33,9 @@ def _validation_error_response(exc: ValidationError) -> JsonResponse:
     return JsonResponse({"error": msg}, status=400)
 
 
-def apply_leave(*, user, employee: Employee, leave_type: LeaveType, payload: dict) -> tuple[LeaveApplication | None, JsonResponse | None]:
+def apply_leave(
+    *, user, employee: Employee, leave_type: LeaveType, payload: dict
+) -> tuple[LeaveApplication | None, JsonResponse | None]:
     """
     Create a PENDING application (or APPROVED immediately when approval not required).
     Returns (instance, None) or (None, error_response).
@@ -155,11 +157,7 @@ def approve_leave(*, user, application_id: int) -> tuple[LeaveApplication | None
 
             Employee.objects.select_for_update().filter(pk=app.employee_id).first()
             lt = app.leave_type
-            bal = (
-                EmployeeLeaveBalance.objects.select_for_update()
-                .filter(employee=app.employee, leave_type=lt)
-                .first()
-            )
+            bal = EmployeeLeaveBalance.objects.select_for_update().filter(employee=app.employee, leave_type=lt).first()
             available, bal = available_leave_balance(
                 app.employee,
                 lt,

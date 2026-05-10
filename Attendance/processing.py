@@ -109,11 +109,7 @@ class BiometricAttendanceProcessor:
             status = AttendanceStatus.L if late_minutes > 0 else AttendanceStatus.P
 
             with transaction.atomic():
-                attendance = (
-                    Attendance.objects.select_for_update()
-                    .filter(employee=emp, date=att_date)
-                    .first()
-                )
+                attendance = Attendance.objects.select_for_update().filter(employee=emp, date=att_date).first()
                 if attendance is None:
                     try:
                         attendance = Attendance.objects.create(

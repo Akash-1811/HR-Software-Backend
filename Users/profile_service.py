@@ -34,11 +34,7 @@ def _optional_url(value: Any) -> str:
 
 
 def _linked_employee(user):
-    return (
-        Employee.objects.filter(user=user)
-        .select_related("department", "office", "organization")
-        .first()
-    )
+    return Employee.objects.filter(user=user).select_related("department", "office", "organization").first()
 
 
 def _safe_extended(emp: Employee) -> EmployeeProfile:

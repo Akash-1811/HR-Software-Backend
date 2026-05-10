@@ -56,9 +56,7 @@ def build_compact_context(*, user, client_route: str | None) -> str:
 
     org_name = ""
     if getattr(user, "organization_id", None):
-        org_name = (
-            Organization.objects.filter(pk=user.organization_id).values_list("name", flat=True).first() or ""
-        )
+        org_name = Organization.objects.filter(pk=user.organization_id).values_list("name", flat=True).first() or ""
     lines.append(f"- Authenticated user role: {getattr(user, 'role', '') or 'unknown'}")
     lines.append(f"- Organization: {org_name or 'none linked'}")
     lines.append(

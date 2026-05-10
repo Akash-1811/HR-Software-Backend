@@ -50,9 +50,7 @@ def _resolve_leave_type_office_for_write(user, body: dict):
     if is_superadmin(user):
         if requested_id is None:
             return None, JsonResponse({"error": "office_id is required"}, status=400)
-        office = (
-            Office.objects.filter(pk=requested_id, is_active=True).select_related("organization").first()
-        )
+        office = Office.objects.filter(pk=requested_id, is_active=True).select_related("organization").first()
         if not office or not office.organization.is_active:
             return None, JsonResponse({"error": "Office not found"}, status=404)
         return office, None

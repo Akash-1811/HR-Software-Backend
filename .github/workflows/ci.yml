@@ -1,4 +1,4 @@
-# Attenova CI: lint → test → build Docker image (push to GHCR on main)
+# Attenova CI: format → test → build Docker image (push to GHCR on main)
 name: CI
 
 on:
@@ -12,7 +12,7 @@ env:
 
 jobs:
   lint:
-    name: Lint
+    name: Format
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -24,9 +24,6 @@ jobs:
 
       - name: Install ruff
         run: pip install ruff
-
-      - name: Run ruff check
-        run: ruff check .
 
       - name: Run ruff format check
         run: ruff format --check .

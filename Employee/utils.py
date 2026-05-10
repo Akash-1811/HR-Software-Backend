@@ -237,9 +237,7 @@ def get_employees_queryset(user):
         qs = Employee.objects.filter(office__managers=user)
         if user.organization_id:
             qs = qs.filter(organization_id=user.organization_id, office__organization_id=user.organization_id)
-        return qs.select_related(
-            "organization", "office", "department", "shift"
-        )
+        return qs.select_related("organization", "office", "department", "shift")
     return Employee.objects.none()
 
 
