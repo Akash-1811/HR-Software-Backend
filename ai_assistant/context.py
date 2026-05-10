@@ -6,7 +6,7 @@ from datetime import timedelta
 
 from django.utils import timezone
 
-from Attendance.models import Attendance, AttendanceStatus
+from Attendance.models import Attendance
 from Employee.models import Employee
 from Leaves.access import (
     get_leave_applications_queryset,

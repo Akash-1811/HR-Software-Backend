@@ -10,7 +10,6 @@ from django.db.models import Sum
 from Employee.models import Employee
 from Leaves.models import (
     EmployeeLeaveBalance,
-    HalfDayPeriod,
     LeaveApplication,
     LeaveApplicationStatus,
     LeaveType,
